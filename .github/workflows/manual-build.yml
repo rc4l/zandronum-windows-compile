@@ -1,0 +1,16 @@
+name: Manual Windows Build
+
+on:
+  workflow_dispatch: # Allows you to trigger the workflow manually from the Actions tab
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Zandronum build script
+        shell: pwsh
+        run: |
+          ./build.ps1

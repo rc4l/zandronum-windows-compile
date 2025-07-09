@@ -31,10 +31,13 @@
 param(
     [ValidateSet("x64")]
     [string]$Platform = "x64",
-    
+
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
-    
+
+    [ValidateSet("clang", "msvc")]
+    [string]$Toolchain = "clang",
+
     [switch]$Clean,
     [switch]$SkipDeps
 )
@@ -62,6 +65,11 @@ $Dependencies = @{
         Version = "3.28.1"
         Url = "https://github.com/Kitware/CMake/releases/download/v3.28.1/cmake-3.28.1-windows-x86_64.zip"
         ExtractPath = "cmake-3.28.1-windows-x86_64"
+    }
+    LLVM = @{
+        Version = "18.1.6"
+        Url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.6/LLVM-18.1.6-win64.exe"
+        ExtractPath = "LLVM-18.1.6-win64"
     }
     NASM = @{
         Version = "2.16.01"
@@ -1072,81 +1080,103 @@ function Get-MSBuildPath {
     }
 }
 
+function Get-LLVM {
+    $llvmDir = Join-Path $DepsDir "llvm"
+    $clangExe = Join-Path $llvmDir "bin\clang.exe"
+    $ninjaExe = Join-Path $llvmDir "bin\ninja.exe"
+    if (Test-Path $clangExe) {
+        Write-Host "LLVM/Clang already exists at: $clangExe"
+        # Check for ninja.exe as well
+        if (-not (Test-Path $ninjaExe)) {
+            Write-Host "ninja.exe not found, downloading..."
+            $ninjaUrl = "https://github.com/ninja-build/ninja/releases/download/v1.11.1/ninja-win.zip"
+            $ninjaZip = Join-Path $DepsDir "ninja.zip"
+            Invoke-Download $ninjaUrl $ninjaZip
+            Expand-Archive7Zip $ninjaZip (Join-Path $llvmDir "bin")
+            Remove-Item $ninjaZip -Force -ErrorAction SilentlyContinue
+            if (Test-Path $ninjaExe) {
+                Write-Host "ninja.exe ready at: $ninjaExe"
+            } else {
+                throw "Failed to setup ninja.exe in LLVM bin directory"
+            }
+        }
+        return $llvmDir
+    }
+    Write-Status "Setting up LLVM/Clang..."
+    $llvmInstaller = Join-Path $DepsDir "LLVM-18.1.6-win64.exe"
+    if (-not (Test-Path $llvmInstaller)) {
+        Write-Host "Downloading LLVM/Clang 18.1.6..."
+        Invoke-Download $Dependencies.LLVM.Url $llvmInstaller
+        Write-Host "LLVM/Clang download successful!"
+    } else {
+        Write-Host "Using existing LLVM installer: $llvmInstaller"
+    }
+    # Extract using 7-Zip (the .exe is a self-extracting archive)
+    Expand-Archive7Zip $llvmInstaller $llvmDir
+    Remove-Item $llvmInstaller -Force -ErrorAction SilentlyContinue
+    # Download ninja.exe after extracting LLVM
+    if (-not (Test-Path $ninjaExe)) {
+        Write-Host "ninja.exe not found, downloading..."
+        $ninjaUrl = "https://github.com/ninja-build/ninja/releases/download/v1.11.1/ninja-win.zip"
+        $ninjaZip = Join-Path $DepsDir "ninja.zip"
+        Invoke-Download $ninjaUrl $ninjaZip
+        Expand-Archive7Zip $ninjaZip (Join-Path $llvmDir "bin")
+        Remove-Item $ninjaZip -Force -ErrorAction SilentlyContinue
+        if (Test-Path $ninjaExe) {
+            Write-Host "ninja.exe ready at: $ninjaExe"
+        } else {
+            throw "Failed to setup ninja.exe in LLVM bin directory"
+        }
+    }
+    if (Test-Path $clangExe) {
+        Write-Host "LLVM/Clang ready at: $clangExe"
+        return $llvmDir
+    } else {
+        throw "Failed to setup LLVM/Clang"
+    }
+}
+
 function Initialize-Dependencies {
     # Always download source code regardless of SkipDeps
     Get-ZandronumSource
-    
+
     if ($SkipDeps) {
         Write-Status "Skipping dependency setup (SkipDeps specified)"
         Write-Status "Source code download completed!"
-        
-        # Initialize script variables to prevent null reference errors
-        # Try to find existing dependencies if they exist
+
         $cmakeDir = Join-Path $DepsDir "cmake"
-        $script:CMakeExe = if (Test-Path (Join-Path $cmakeDir "bin\cmake.exe")) { 
-            Join-Path $cmakeDir "bin\cmake.exe" 
-        } else { 
-            $null 
-        }
-        
-        $nasmDir = Join-Path $DepsDir "nasm"  
-        $script:NASMExe = if (Test-Path (Join-Path $nasmDir "nasm.exe")) { 
-            Join-Path $nasmDir "nasm.exe" 
-        } else { 
-            $null 
-        }
-        
+        $script:CMakeExe = if (Test-Path (Join-Path $cmakeDir "bin\cmake.exe")) { Join-Path $cmakeDir "bin\cmake.exe" } else { $null }
+        $llvmDir = Join-Path $DepsDir "llvm"
+        $script:LLVMDir = if (Test-Path (Join-Path $llvmDir "bin\clang.exe")) { $llvmDir } else { $null }
+        $nasmDir = Join-Path $DepsDir "nasm"
+        $script:NASMExe = if (Test-Path (Join-Path $nasmDir "nasm.exe")) { Join-Path $nasmDir "nasm.exe" } else { $null }
         $pythonDir = Join-Path $DepsDir "python"
-        $script:PythonExe = if (Test-Path (Join-Path $pythonDir "python.exe")) { 
-            Join-Path $pythonDir "python.exe" 
-        } else { 
-            $null 
-        }
-        
+        $script:PythonExe = if (Test-Path (Join-Path $pythonDir "python.exe")) { Join-Path $pythonDir "python.exe" } else { $null }
         $fmodDir = Join-Path $DepsDir "fmod"
-        $script:FMODDir = if (Test-Path $fmodDir) { 
-            $fmodDir 
-        } else { 
-            $null 
-        }
-        
+        $script:FMODDir = if (Test-Path $fmodDir) { $fmodDir } else { $null }
         $opensslDir = Join-Path $DepsDir "openssl"
-        $script:OpenSSLDir = if (Test-Path $opensslDir) { 
-            $opensslDir 
-        } else { 
-            $null 
-        }
-        
+        $script:OpenSSLDir = if (Test-Path $opensslDir) { $opensslDir } else { $null }
         $opusDir = Join-Path $DepsDir "opus"
-        $script:OpusDir = if (Test-Path $opusDir) { 
-            $opusDir 
-        } else { 
-            $null 
-        }
-        
+        $script:OpusDir = if (Test-Path $opusDir) { $opusDir } else { $null }
+
         Write-Host "Using existing dependencies if available:"
         Write-Host "  CMake: $($script:CMakeExe)"
+        Write-Host "  LLVM/Clang: $($script:LLVMDir)"
         Write-Host "  NASM: $($script:NASMExe)"
         Write-Host "  Python: $($script:PythonExe)"
         Write-Host "  FMOD: $($script:FMODDir)"
         Write-Host "  OpenSSL: $($script:OpenSSLDir)"
         Write-Host "  Opus: $($script:OpusDir)"
-        
     } else {
         Write-Status "Setting up dependencies..."
-        
-        # Setup core dependencies
         Get-SevenZip
         $script:CMakeExe = Get-CMake
+        $script:LLVMDir = Get-LLVM
         $script:NASMExe = Get-NASM
         $script:PythonExe = Get-Python
         Get-WindowsSDK
-        
-        # Setup optional dependencies
         $script:FMODDir = Get-FMOD
         $script:OpenSSLDir = Get-OpenSSL
-        
-        # Try to setup Opus, but don't fail the build if it doesn't work
         try {
             $script:OpusDir = Get-Opus
         } catch {
@@ -1154,73 +1184,126 @@ function Initialize-Dependencies {
             Write-Warning "Continuing without Opus support"
             $script:OpusDir = $null
         }
-        
         Write-Status "Dependencies setup completed!"
     }
 }
 
 function Invoke-CMakeGenerate {
     Write-Status "Generating build files with CMake..."
-    
+
     $cmakeArgs = @()
-    
-    # Set generator and toolset
-    $cmakeArgs += "-G", "Visual Studio 17 2022"
-    $cmakeArgs += "-A", $Platform
-    $cmakeArgs += "-T", "v143"
-    
-    # Set build directory
-    $cmakeArgs += "-B", $BuildDir
-    
-    # Set source directory
     $sourceDir = Join-Path $SrcDir "zandronum"
-    $cmakeArgs += "-S", $sourceDir
-    
-    # Add dependency paths if they exist
+
+    if ($Toolchain -eq "clang") {
+        $llvmDir = Join-Path $DepsDir "llvm"
+        $clangPath = Join-Path $llvmDir "bin"
+        # Convert all paths to forward slashes for CMake compatibility
+        $clangC = (Join-Path $clangPath "clang.exe") -replace '\\','/'
+        $clangXX = (Join-Path $clangPath "clang++.exe") -replace '\\','/'
+        $ninjaExe = (Join-Path $clangPath "ninja.exe") -replace '\\','/'
+        $buildDirFwd = $BuildDir -replace '\\','/'
+        $sourceDirFwd = $sourceDir -replace '\\','/'
+
+        # Try to find rc.exe in Visual Studio or Windows SDK
+        $rcExe = $null
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        if (-not (Test-Path $vswhere)) {
+            $vswhere = "${env:ProgramFiles}\Microsoft Visual Studio\Installer\vswhere.exe"
+        }
+        if (Test-Path $vswhere) {
+            $vsInstallPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+            if ($vsInstallPath) {
+                $rcPath = Join-Path $vsInstallPath "VC\Tools\MSVC"
+                if (Test-Path $rcPath) {
+                    $msvcVer = Get-ChildItem $rcPath | Sort-Object Name -Descending | Select-Object -First 1
+                    if ($msvcVer) {
+                        $rcExePath = Join-Path $msvcVer.FullName "bin\Hostx64\x64\rc.exe"
+                        if (Test-Path $rcExePath) {
+                            $rcExe = $rcExePath -replace '\\','/'
+                        }
+                    }
+                }
+            }
+        }
+        # Fallback: try Windows SDK
+        if (-not $rcExe) {
+            $sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+            if (Test-Path $sdkRoot) {
+                $sdkVer = Get-ChildItem $sdkRoot | Sort-Object Name -Descending | Select-Object -First 1
+                if ($sdkVer) {
+                    $rcExePath = Join-Path $sdkVer.FullName "x64\rc.exe"
+                    if (Test-Path $rcExePath) {
+                        $rcExe = $rcExePath -replace '\\','/'
+                    }
+                }
+            }
+        }
+        if ($rcExe) {
+            $cmakeArgs += "-DCMAKE_RC_COMPILER=$rcExe"
+            Write-Host "Added RC compiler to CMake: $rcExe"
+        } else {
+            Write-Warning "Could not find rc.exe (Windows Resource Compiler). CMake may fail."
+        }
+
+        $cmakeArgs += "-G", "Ninja"
+        $cmakeArgs += "-B", $buildDirFwd
+        $cmakeArgs += "-S", $sourceDirFwd
+        $cmakeArgs += "-DCMAKE_BUILD_TYPE=$Configuration"
+        $cmakeArgs += "-DCMAKE_C_COMPILER=$clangC"
+        $cmakeArgs += "-DCMAKE_CXX_COMPILER=$clangXX"
+        $cmakeArgs += "-DCMAKE_MAKE_PROGRAM=$ninjaExe"
+        Write-Host "Using Clang/LLVM toolchain for build."
+    } else {
+        $cmakeArgs += "-G", "Visual Studio 17 2022"
+        $cmakeArgs += "-A", $Platform
+        $cmakeArgs += "-T", "v143"
+        $cmakeArgs += "-B", $BuildDir
+        $cmakeArgs += "-S", $sourceDir
+        $cmakeArgs += "-DCMAKE_BUILD_TYPE=$Configuration"
+        Write-Host "Using MSVC toolchain for build."
+    }
+
+    # Add dependency paths if they exist, convert to forward slashes for CMake
     $fmodDir = Join-Path $DepsDir "fmod"
     if (Test-Path $fmodDir) {
-        $fmodInclude = Join-Path $fmodDir "include"
-        $fmodLib = Join-Path $fmodDir "lib\fmodex64_vc.lib"
-        if ((Test-Path $fmodInclude) -and (Test-Path $fmodLib)) {
+        $fmodInclude = (Join-Path $fmodDir "include") -replace '\\','/'
+        $fmodLib = (Join-Path $fmodDir "lib\fmodex64_vc.lib") -replace '\\','/'
+        if ((Test-Path $fmodDir) -and (Test-Path ($fmodDir + "\lib\fmodex64_vc.lib"))) {
             $cmakeArgs += "-DFMOD_INCLUDE_DIR=$fmodInclude"
             $cmakeArgs += "-DFMOD_LIBRARY=$fmodLib"
             Write-Host "Added FMOD paths to CMake - Include: $fmodInclude, Library: $fmodLib"
         }
     }
-    
-    $opensslDir = Join-Path $DepsDir "openssl"
-    if (Test-Path $opensslDir) {
-        $opensslInclude = Join-Path $opensslDir "include"
-        $opensslLib = Join-Path $opensslDir "lib"
-        if ((Test-Path $opensslInclude) -and (Test-Path $opensslLib)) {
+
+    $opensslDir = (Join-Path $DepsDir "openssl") -replace '\\','/'
+    if (Test-Path ($DepsDir + "\openssl")) {
+        $opensslInclude = (Join-Path $DepsDir "openssl\include") -replace '\\','/'
+        $opensslLib = (Join-Path $DepsDir "openssl\lib") -replace '\\','/'
+        if ((Test-Path ($DepsDir + "\openssl\include")) -and (Test-Path ($DepsDir + "\openssl\lib"))) {
             $cmakeArgs += "-DOPENSSL_ROOT_DIR=$opensslDir"
             $cmakeArgs += "-DOPENSSL_INCLUDE_DIR=$opensslInclude"
             $cmakeArgs += "-DOPENSSL_LIBRARIES_DIR=$opensslLib"
             Write-Host "Added OpenSSL paths to CMake"
         }
     }
-    
-    $opusDir = Join-Path $DepsDir "opus"
-    if (Test-Path $opusDir) {
-        $opusInclude = Join-Path $opusDir "include"
-        $opusLib = Join-Path $opusDir "lib\opus.lib"
-        if ((Test-Path $opusInclude) -and (Test-Path $opusLib)) {
+
+    $opusDir = (Join-Path $DepsDir "opus") -replace '\\','/'
+    if (Test-Path ($DepsDir + "\opus")) {
+        $opusInclude = (Join-Path $DepsDir "opus\include") -replace '\\','/'
+        $opusLib = (Join-Path $DepsDir "opus\lib\opus.lib") -replace '\\','/'
+        if ((Test-Path ($DepsDir + "\opus\include")) -and (Test-Path ($DepsDir + "\opus\lib\opus.lib"))) {
             $cmakeArgs += "-DOPUS_INCLUDE_DIR=$opusInclude"
             $cmakeArgs += "-DOPUS_LIBRARIES=$opusLib"
             Write-Host "Added Opus paths to CMake - Include: $opusInclude, Library: $opusLib"
         }
     }
-    
-    # Add Windows SDK path if available
-    $windowsSDKDir = Join-Path $DepsDir "WindowsSDK"
-    if (Test-Path $windowsSDKDir) {
+
+    $windowsSDKDir = (Join-Path $DepsDir "WindowsSDK") -replace '\\','/'
+    if (Test-Path ($DepsDir + "\WindowsSDK")) {
         $cmakeArgs += "-DWINDOWS_SDK_DIR=$windowsSDKDir"
         Write-Host "Added Windows SDK path to CMake"
     }
-    
-    # Set configuration-specific options
-    $cmakeArgs += "-DCMAKE_BUILD_TYPE=$Configuration"
-    
+
     # Ensure CMake is available
     if (-not $script:CMakeExe -or -not (Test-Path $script:CMakeExe)) {
         $cmakeDir = Join-Path $DepsDir "cmake"
@@ -1230,16 +1313,15 @@ function Invoke-CMakeGenerate {
         }
         Write-Host "Found CMake at: $script:CMakeExe"
     }
-    
+
     Write-Host "Running CMake with arguments:"
     Write-Host "  $($cmakeArgs -join ' ')"
-    
-    # Run CMake
+
     & $script:CMakeExe @cmakeArgs
     if ($LASTEXITCODE -ne 0) {
         throw "CMake generation failed with exit code $LASTEXITCODE"
     }
-    
+
     Write-Status "CMake generation completed successfully!"
 }
 
