@@ -24,35 +24,6 @@ jobs:
         run: |
           ./build.ps1
 
-      - name: System diagnostics (check for OpenSSL libraries)
-        run: |
-          Write-Host "=== System Diagnostics ==="
-          Write-Host "Current PATH:"
-          $env:PATH -split ";" | ForEach-Object { Write-Host "  $_" }
-          
-          Write-Host "`nSearching for OpenSSL libraries in system:"
-          Get-ChildItem -Path "C:\Program Files" -Recurse -Include "*ssl*.dll", "*crypto*.dll" -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
-          Get-ChildItem -Path "C:\Windows\System32" -Include "*ssl*.dll", "*crypto*.dll" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
-          
-          Write-Host "`nTesting direct DLL dependencies with dumpbin (if available):"
-          $zandronumPath = ".\build\Release\zandronum.exe"
-          if (Test-Path $zandronumPath) {
-            Write-Host "Executable: $zandronumPath"
-            
-            # Try to use dumpbin to check dependencies
-            try {
-              $dumpbinPath = Get-ChildItem -Path "C:\Program Files*" -Recurse -Include "dumpbin.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($dumpbinPath) {
-                Write-Host "Using dumpbin: $($dumpbinPath.FullName)"
-                & $dumpbinPath.FullName /dependents $zandronumPath | Select-String -Pattern "ssl|crypto" -CaseSensitive
-              } else {
-                Write-Host "dumpbin not found"
-              }
-            } catch {
-              Write-Host "dumpbin failed: $_"
-            }
-          }
-
       - name: Write Zandronum version badge JSON
         if: ${{ success() }}
         run: |
