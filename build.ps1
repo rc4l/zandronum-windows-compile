@@ -1035,47 +1035,41 @@ function Get-Opus {
 }
 
 function Get-MSBuildPath {
-    # Try to find MSBuild in common locations
-    $msBuildPaths = @(
-        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
-        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe",
-        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
-        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
-        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe",
-        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
-        "${env:ProgramFiles}\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
-        "${env:ProgramFiles}\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\MSBuild.exe",
-        "${env:ProgramFiles}\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe",
-        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
-        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\MSBuild.exe",
-        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe"
-    )
-    
-    foreach ($path in $msBuildPaths) {
-        if (Test-Path $path) {
-            Write-Host "Found MSBuild at: $path"
-            return $path
-        }
-    }
-    
-    # Try using vswhere to find MSBuild
+    # Use vswhere.exe to find MSBuild - the portable, official way
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-    if (Test-Path $vswhere) {
-        try {
-            $vsInstallPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath | Select-Object -First 1
-            if ($vsInstallPath) {
-                $msBuildPath = Join-Path $vsInstallPath "MSBuild\Current\Bin\MSBuild.exe"
-                if (Test-Path $msBuildPath) {
-                    Write-Host "Found MSBuild via vswhere at: $msBuildPath"
-                    return $msBuildPath
-                }
-            }
-        } catch {
-            Write-Warning "vswhere failed: $_"
-        }
+    if (-not (Test-Path $vswhere)) {
+        $vswhere = "${env:ProgramFiles}\Microsoft Visual Studio\Installer\vswhere.exe"
     }
     
-    return $null
+    if (-not (Test-Path $vswhere)) {
+        Write-Warning "vswhere.exe not found. Please ensure Visual Studio 2017 or later is installed."
+        return $null
+    }
+    
+    try {
+        # Find the latest VS installation with MSBuild component
+        $vsInstallPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath | Select-Object -First 1
+        
+        if ([string]::IsNullOrWhiteSpace($vsInstallPath)) {
+            Write-Warning "No Visual Studio installation with MSBuild found."
+            return $null
+        }
+        
+        # Construct MSBuild path
+        $msBuildPath = Join-Path $vsInstallPath "MSBuild\Current\Bin\MSBuild.exe"
+        
+        if (Test-Path $msBuildPath) {
+            Write-Host "Found MSBuild via vswhere at: $msBuildPath"
+            return $msBuildPath
+        } else {
+            Write-Warning "MSBuild.exe not found at expected location: $msBuildPath"
+            return $null
+        }
+        
+    } catch {
+        Write-Warning "vswhere failed: $_"
+        return $null
+    }
 }
 
 function Initialize-Dependencies {
