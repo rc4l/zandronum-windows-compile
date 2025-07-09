@@ -575,9 +575,23 @@ function Get-FMOD {
                 Copy-Item $libDir $fmodLibDir -Recurse -Force
                 Write-Host "Copied FMOD libraries from: $libDir"
             }
+            
+            # Copy DLL files to fmod/bin directory
+            $fmodBinDir = Join-Path $fmodDir "bin"
+            if (-not (Test-Path $fmodBinDir)) {
+                New-Item -ItemType Directory -Path $fmodBinDir -Force | Out-Null
+            }
+            
+            # Look for DLL files in the extracted content
+            $dllFiles = Get-ChildItem $tempExtractDir -Recurse -Filter "*.dll"
+            foreach ($dll in $dllFiles) {
+                Copy-Item $dll.FullName $fmodBinDir -Force
+                Write-Host "Copied FMOD DLL: $($dll.Name) to bin directory"
+            }
+            
         } else {
-            # Fallback: look for any include/lib directories
-            Write-Host "API directory not found, searching for inc/lib directories..."
+            # Fallback: look for any include/lib directories and DLL files
+            Write-Host "API directory not found, searching for inc/lib directories and DLL files..."
             $includeSearch = Get-ChildItem $tempExtractDir -Recurse -Directory | Where-Object { $_.Name -like "*inc*" } | Select-Object -First 1
             $libSearch = Get-ChildItem $tempExtractDir -Recurse -Directory | Where-Object { $_.Name -like "*lib*" } | Select-Object -First 1
             
@@ -590,10 +604,26 @@ function Get-FMOD {
                 Write-Host "Copied FMOD libraries from: $($libSearch.FullName)"
             }
             
-            if (-not $includeSearch -and -not $libSearch) {
-                Write-Warning "Could not find FMOD include or library directories in extracted content"
+            # Copy all DLL files found anywhere in the extraction
+            $fmodBinDir = Join-Path $fmodDir "bin"
+            if (-not (Test-Path $fmodBinDir)) {
+                New-Item -ItemType Directory -Path $fmodBinDir -Force | Out-Null
+            }
+            
+            $dllFiles = Get-ChildItem $tempExtractDir -Recurse -Filter "*.dll"
+            foreach ($dll in $dllFiles) {
+                Copy-Item $dll.FullName $fmodBinDir -Force
+                Write-Host "Copied FMOD DLL: $($dll.Name) to bin directory"
+            }
+            
+            if (-not $includeSearch -and -not $libSearch -and $dllFiles.Count -eq 0) {
+                Write-Warning "Could not find FMOD include, library, or DLL files in extracted content"
                 Write-Host "Available directories:"
                 Get-ChildItem $tempExtractDir -Recurse -Directory | ForEach-Object {
+                    Write-Host "  $($_.FullName)"
+                }
+                Write-Host "Available files:"
+                Get-ChildItem $tempExtractDir -Recurse -File | ForEach-Object {
                     Write-Host "  $($_.FullName)"
                 }
             }
@@ -1089,6 +1119,34 @@ function Invoke-Build {
     & $script:CMakeExe @buildArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Build failed with exit code $LASTEXITCODE"
+    }
+    
+    # Copy FMOD DLLs to output directory
+    $outputDir = Join-Path $BuildDir $Configuration
+    
+    if ($script:FMODDir -and (Test-Path $script:FMODDir)) {
+        $fmodBinDir = Join-Path $script:FMODDir "bin"
+        
+        if ((Test-Path $fmodBinDir) -and (Test-Path $outputDir)) {
+            Write-Status "Copying FMOD DLLs to output directory..."
+            $dllFiles = Get-ChildItem $fmodBinDir -Filter "*.dll"
+            
+            # Copy only the essential FMOD DLLs
+            $essentialDlls = @("fmodex64.dll", "fmodex.dll", "fmodexL64.dll", "fmodexL.dll")
+            foreach ($dll in $dllFiles) {
+                if ($essentialDlls -contains $dll.Name) {
+                    $destPath = Join-Path $outputDir $dll.Name
+                    Copy-Item $dll.FullName $destPath -Force
+                    Write-Host "Copied FMOD DLL: $($dll.Name) to output directory"
+                }
+            }
+        } elseif (-not (Test-Path $fmodBinDir)) {
+            Write-Warning "FMOD bin directory not found: $fmodBinDir"
+        } elseif (-not (Test-Path $outputDir)) {
+            Write-Warning "Output directory not found: $outputDir"
+        }
+    } else {
+        Write-Warning "FMOD directory not set or not found. FMOD DLLs not copied."
     }
     
     Write-Status "Build completed successfully!"
