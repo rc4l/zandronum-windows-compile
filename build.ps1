@@ -65,9 +65,9 @@ $Dependencies = @{
         ExtractPath = "fmod"
     }
     OpenSSL = @{
-        Version = "3.2.0"
-        Url = "https://slproweb.com/download/Win32OpenSSL-3_2_0.msi"
-        ExtractPath = "openssl"
+        Version = "3.5.1"
+        Url = "https://download.firedaemon.com/FireDaemon-OpenSSL/openssl-3.5.1.zip"
+        ExtractPath = "openssl-3.5.1"
     }
     Python = @{
         Version = "3.12.1"
@@ -75,9 +75,9 @@ $Dependencies = @{
         ExtractPath = "python"
     }
     Opus = @{
-        Version = "1.4"
-        Url = "https://downloads.xiph.org/releases/opus/opus-1.4.tar.gz"
-        ExtractPath = "opus"
+        Version = "1.3.1"
+        Url = "https://ftp.osuosl.org/pub/xiph/releases/opus/opus-1.3.1-win32.zip"
+        ExtractPath = "opus-1.3.1"
     }
 }
 
@@ -272,6 +272,7 @@ function Get-SevenZip {
         try {
             & $sevenZipExe | Select-Object -First 2 | Out-Null
             Write-Host "7z.exe is working and ready for NSIS extraction!"
+            $script:SevenZipExe = $sevenZipExe
             return $sevenZipExe
         } catch {
             Write-Warning "7z.exe test failed: $_"
@@ -608,145 +609,461 @@ function Get-FMOD {
     }
 }
 
-function Initialize-Dependencies {
-    Write-Status "Setting up dependencies..."
+function Get-OpenSSL {
+    $opensslDir = Join-Path $DepsDir "openssl"
+    $opensslIncludeDir = Join-Path $opensslDir "include"
+    $opensslLibDir = Join-Path $opensslDir "lib"
     
-    # Always get source code 
-    $script:ZandronumSrc = Get-ZandronumSource
+    if (Test-Path $opensslIncludeDir) {
+        Write-Host "OpenSSL already exists at: $opensslDir"
+        return $opensslDir
+    }
     
-    if ($SkipDeps) {
-        Write-Status "Skipping tool dependency setup as requested"
-        
-        # Try to find existing tools
-        $cmakeExe = Join-Path $DepsDir "cmake\bin\cmake.exe"
-        if (Test-Path $cmakeExe) {
-            $script:CMakeExe = $cmakeExe
-            Write-Host "Using existing CMake at: $cmakeExe"
-        } else {
-            $script:CMakeExe = Get-CMake
+    Write-Status "Setting up OpenSSL..."
+    $opensslZip = Join-Path $DepsDir "openssl-3.5.1.zip"
+    
+    # Download OpenSSL
+    if (-not (Test-Path $opensslZip)) {
+        Write-Host "Downloading OpenSSL 3.5.1..."
+        Invoke-Download $Dependencies.OpenSSL.Url $opensslZip
+        Write-Host "OpenSSL download successful!"
+    } else {
+        Write-Host "Using existing OpenSSL archive: $opensslZip"
+    }
+    
+    # Extract OpenSSL using 7-Zip
+    Write-Host "Extracting OpenSSL using 7-Zip..."
+    $tempExtractDir = Join-Path $DepsDir "openssl_temp"
+    
+    try {
+        # Clean up any previous extraction attempts
+        if (Test-Path $tempExtractDir) {
+            Remove-Item $tempExtractDir -Recurse -Force
         }
         
-        return
+        # Extract the archive
+        Write-Host "Running 7-Zip extraction..."
+        Expand-Archive7Zip $opensslZip $tempExtractDir
+        
+        Write-Host "Extraction completed. Looking for OpenSSL x64 files..."
+        
+        # Create final OpenSSL directory
+        if (-not (Test-Path $opensslDir)) {
+            New-Item -ItemType Directory -Path $opensslDir -Force | Out-Null
+        }
+        
+        # Look for the x64 directory in the extracted content (FireDaemon structure)
+        $x64Dir = Get-ChildItem $tempExtractDir -Recurse -Directory | Where-Object { $_.Name -eq "x64" } | Select-Object -First 1
+        
+        if ($x64Dir) {
+            $x64Path = $x64Dir.FullName
+            Write-Host "Found x64 directory at: $x64Path"
+            
+            # Copy include files from x64 directory
+            $srcIncludeDir = Join-Path $x64Path "include"
+            if (Test-Path $srcIncludeDir) {
+                Copy-Item $srcIncludeDir $opensslDir -Recurse -Force
+                Write-Host "Copied OpenSSL headers from: $srcIncludeDir"
+            }
+            
+            # Copy library files from x64 directory
+            $srcLibDir = Join-Path $x64Path "lib"
+            if (Test-Path $srcLibDir) {
+                Copy-Item $srcLibDir $opensslDir -Recurse -Force
+                Write-Host "Copied OpenSSL libraries from: $srcLibDir"
+            }
+            
+            # Copy binary files from x64 directory
+            $srcBinDir = Join-Path $x64Path "bin"
+            if (Test-Path $srcBinDir) {
+                Copy-Item $srcBinDir $opensslDir -Recurse -Force
+                Write-Host "Copied OpenSSL binaries from: $srcBinDir"
+            }
+        } else {
+            # Fallback: look for include/lib directories anywhere in the structure
+            Write-Host "x64 directory not found, searching for include/lib directories..."
+            
+            $includeFound = $false
+            $libFound = $false
+            
+            Get-ChildItem $tempExtractDir -Recurse -Directory | ForEach-Object {
+                if ($_.Name -eq "include" -and (Test-Path (Join-Path $_.FullName "openssl"))) {
+                    $srcIncludeDir = $_.FullName
+                    Copy-Item $srcIncludeDir $opensslDir -Recurse -Force
+                    Write-Host "Copied OpenSSL headers from: $srcIncludeDir"
+                    $includeFound = $true
+                }
+                if ($_.Name -eq "lib" -and ($_.GetFiles("*.lib").Count -gt 0)) {
+                    $srcLibDir = $_.FullName
+                    Copy-Item $srcLibDir $opensslDir -Recurse -Force
+                    Write-Host "Copied OpenSSL libraries from: $srcLibDir"
+                    $libFound = $true
+                }
+            }
+            
+            if (-not ($includeFound -and $libFound)) {
+                throw "Could not find OpenSSL include or lib directories in extracted content"
+            }
+        }
+        
+        # Clean up temporary files
+        Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+        
+        if (Test-Path $opensslIncludeDir) {
+            Write-Host "OpenSSL ready at: $opensslDir"
+            return $opensslDir
+        } else {
+            throw "Failed to extract OpenSSL include files"
+        }
+        
+    } catch {
+        # Clean up on failure
+        Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+        throw "Failed to setup OpenSSL: $_"
+    }
+}
+
+function Get-Opus {
+    $opusDir = Join-Path $DepsDir "opus"
+    $opusIncludeDir = Join-Path $opusDir "include"
+    $opusLibDir = Join-Path $opusDir "lib"
+    $opusLibFile = Join-Path $opusLibDir "opus.lib"
+    
+    if (Test-Path $opusLibFile) {
+        Write-Host "Opus already exists at: $opusDir"
+        return $opusDir
     }
     
-    # Get essential tools
-    $script:SevenZipExe = Get-SevenZip
-    $script:CMakeExe = Get-CMake
-    $script:NASMExe = Get-NASM
-    $script:PythonExe = Get-Python
-    $script:WindowsSDK = Get-WindowsSDK
-    $script:FMODDir = Get-FMOD
+    Write-Status "Setting up Opus..."
+    $opusZip = Join-Path $DepsDir "opus.zip"
     
-    if (-not $script:WindowsSDK) {
-        Write-Warning "Windows SDK with DirectX headers not found. Build may fail."
+    # Download Opus source
+    if (-not (Test-Path $opusZip)) {
+        Write-Host "Downloading Opus 1.4 source..."
+        Invoke-Download $Dependencies.Opus.Url $opusZip
+        Write-Host "Opus download successful!"
+    } else {
+        Write-Host "Using existing Opus archive: $opusZip"
     }
     
-    Write-Status "Dependencies setup complete!"
+    # Extract Opus using 7-Zip
+    Write-Host "Extracting Opus using 7-Zip..."
+    $tempExtractDir = Join-Path $DepsDir "opus_temp"
+    
+    try {
+        # Clean up any previous extraction
+        if (Test-Path $tempExtractDir) {
+            Remove-Item $tempExtractDir -Recurse -Force
+        }
+        
+        # Extract the archive
+        Expand-Archive7Zip $opusZip $tempExtractDir
+        
+        # Find the extracted Opus directory
+        $extractedOpusDir = Get-ChildItem $tempExtractDir -Directory | Where-Object { $_.Name -like "opus*" } | Select-Object -First 1
+        if (-not $extractedOpusDir) {
+            throw "Could not find extracted Opus directory"
+        }
+        
+        $opusSourceDir = $extractedOpusDir.FullName
+        Write-Host "Found Opus source at: $opusSourceDir"
+        
+        # Check for Visual Studio solution
+        $opusSolution = Join-Path $opusSourceDir "win32\VS2015\opus.sln"
+        if (-not (Test-Path $opusSolution)) {
+            throw "Could not find Opus Visual Studio solution at: $opusSolution"
+        }
+        
+        Write-Host "Building Opus with MSBuild..."
+        
+        # Find MSBuild
+        $msBuildPath = Get-MSBuildPath
+        if (-not $msBuildPath) {
+            throw "MSBuild not found. Please ensure Visual Studio is installed."
+        }
+        
+        # Build Opus (Release configuration, x64 platform)
+        $buildArgs = @(
+            $opusSolution
+            "/p:Configuration=Release"
+            "/p:Platform=x64"
+            "/p:PlatformToolset=v143"
+            "/m"
+        )
+        
+        Write-Host "Running: $msBuildPath $($buildArgs -join ' ')"
+        & $msBuildPath @buildArgs
+        
+        if ($LASTEXITCODE -ne 0) {
+            throw "Opus build failed with exit code $LASTEXITCODE"
+        }
+        
+        Write-Host "Opus build successful!"
+        
+        # Copy built library and includes to our deps structure
+        $builtLibPath = Join-Path $opusSourceDir "win32\VS2015\x64\Release\opus.lib"
+        $opusIncludeSourceDir = Join-Path $opusSourceDir "include"
+        
+        if (-not (Test-Path $builtLibPath)) {
+            throw "Built Opus library not found at: $builtLibPath"
+        }
+        
+        if (-not (Test-Path $opusIncludeSourceDir)) {
+            throw "Opus include directory not found at: $opusIncludeSourceDir"
+        }
+        
+        # Create our Opus directory structure
+        if (-not (Test-Path $opusDir)) {
+            New-Item -ItemType Directory -Path $opusDir -Force | Out-Null
+        }
+        if (-not (Test-Path $opusIncludeDir)) {
+            New-Item -ItemType Directory -Path $opusIncludeDir -Force | Out-Null
+        }
+        if (-not (Test-Path $opusLibDir)) {
+            New-Item -ItemType Directory -Path $opusLibDir -Force | Out-Null
+        }
+        
+        # Copy the built library
+        Copy-Item $builtLibPath $opusLibFile -Force
+        Write-Host "Copied Opus library to: $opusLibFile"
+        
+        # Copy include files
+        Copy-Item "$opusIncludeSourceDir\*" $opusIncludeDir -Recurse -Force
+        Write-Host "Copied Opus headers to: $opusIncludeDir"
+        
+        # Clean up temporary files
+        Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $opusZip -Force -ErrorAction SilentlyContinue
+        
+        if (Test-Path $opusLibFile) {
+            Write-Host "Opus ready at: $opusDir"
+            return $opusDir
+        } else {
+            throw "Failed to setup Opus library"
+        }
+        
+    } catch {
+        # Clean up on failure
+        Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+        throw "Failed to setup Opus: $_"
+    }
+}
+
+function Get-MSBuildPath {
+    # Try to find MSBuild in common locations
+    $msBuildPaths = @(
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe"
+    )
+    
+    foreach ($path in $msBuildPaths) {
+        if (Test-Path $path) {
+            Write-Host "Found MSBuild at: $path"
+            return $path
+        }
+    }
+    
+    # Try using vswhere to find MSBuild
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        try {
+            $vsInstallPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath | Select-Object -First 1
+            if ($vsInstallPath) {
+                $msBuildPath = Join-Path $vsInstallPath "MSBuild\Current\Bin\MSBuild.exe"
+                if (Test-Path $msBuildPath) {
+                    Write-Host "Found MSBuild via vswhere at: $msBuildPath"
+                    return $msBuildPath
+                }
+            }
+        } catch {
+            Write-Warning "vswhere failed: $_"
+        }
+    }
+    
+    return $null
+}
+
+function Initialize-Dependencies {
+    # Always download source code regardless of SkipDeps
+    Get-ZandronumSource
+    
+    if ($SkipDeps) {
+        Write-Status "Skipping dependency setup (SkipDeps specified)"
+        Write-Status "Source code download completed!"
+    } else {
+        Write-Status "Setting up dependencies..."
+        
+        # Setup core dependencies
+        Get-SevenZip
+        $script:CMakeExe = Get-CMake
+        $script:NASMExe = Get-NASM
+        $script:PythonExe = Get-Python
+        Get-WindowsSDK
+        
+        # Setup optional dependencies
+        $script:FMODDir = Get-FMOD
+        $script:OpenSSLDir = Get-OpenSSL
+        
+        # Try to setup Opus, but don't fail the build if it doesn't work
+        try {
+            $script:OpusDir = Get-Opus
+        } catch {
+            Write-Warning "Failed to setup Opus: $_"
+            Write-Warning "Continuing without Opus support"
+            $script:OpusDir = $null
+        }
+        
+        Write-Status "Dependencies setup completed!"
+    }
 }
 
 function Invoke-CMakeGenerate {
     Write-Status "Generating build files with CMake..."
     
-    $buildPlatformDir = Join-Path $BuildDir $Platform
-    if (-not (Test-Path $buildPlatformDir)) {
-        New-Item -ItemType Directory -Path $buildPlatformDir -Force | Out-Null
-    }
+    $cmakeArgs = @()
     
-    if ($Clean -and (Test-Path $buildPlatformDir)) {
-        Write-Status "Cleaning build directory..."
-        Remove-Item "$buildPlatformDir\*" -Recurse -Force
-    }
+    # Set generator and toolset
+    $cmakeArgs += "-G", "Visual Studio 17 2022"
+    $cmakeArgs += "-A", $Platform
+    $cmakeArgs += "-T", "v143"
     
-    Set-Location $buildPlatformDir
+    # Set build directory
+    $cmakeArgs += "-B", $BuildDir
     
-    $generator = "Visual Studio 17 2022"
-    $architecture = "x64"
+    # Set source directory
+    $sourceDir = Join-Path $SrcDir "zandronum"
+    $cmakeArgs += "-S", $sourceDir
     
-    $cmakeArgs = @(
-        "-G", $generator
-        "-A", $architecture
-        "-T", "v143"
-        "-DCMAKE_BUILD_TYPE=$Configuration"
-    )
-    
-    # Add dependency paths when available
-    if ((Test-Path variable:script:FMODDir) -and $script:FMODDir -and (Test-Path $script:FMODDir)) {
-        $fmodInclude = Join-Path $script:FMODDir "include"
-        $fmodLib = Join-Path $script:FMODDir "lib"
+    # Add dependency paths if they exist
+    $fmodDir = Join-Path $DepsDir "fmod"
+    if (Test-Path $fmodDir) {
+        $fmodInclude = Join-Path $fmodDir "include"
+        $fmodLib = Join-Path $fmodDir "lib"
         if ((Test-Path $fmodInclude) -and (Test-Path $fmodLib)) {
             $cmakeArgs += "-DFMOD_INCLUDE_DIR=$fmodInclude"
-            $cmakeArgs += "-DFMOD_LIBRARY=$fmodLib"
-            Write-Host "Added FMOD paths: $fmodInclude, $fmodLib"
+            $cmakeArgs += "-DFMOD_LIBRARY_DIR=$fmodLib"
+            Write-Host "Added FMOD paths to CMake"
         }
     }
     
-    $cmakeArgs += $script:ZandronumSrc
-    
-    Write-Host "Running: $script:CMakeExe $($cmakeArgs -join ' ')"
-    
-    try {
-        & $script:CMakeExe @cmakeArgs
-        if ($LASTEXITCODE -ne 0) {
-            throw "CMake generation failed with exit code $LASTEXITCODE"
+    $opensslDir = Join-Path $DepsDir "openssl"
+    if (Test-Path $opensslDir) {
+        $opensslInclude = Join-Path $opensslDir "include"
+        $opensslLib = Join-Path $opensslDir "lib"
+        if ((Test-Path $opensslInclude) -and (Test-Path $opensslLib)) {
+            $cmakeArgs += "-DOPENSSL_ROOT_DIR=$opensslDir"
+            $cmakeArgs += "-DOPENSSL_INCLUDE_DIR=$opensslInclude"
+            $cmakeArgs += "-DOPENSSL_LIBRARIES_DIR=$opensslLib"
+            Write-Host "Added OpenSSL paths to CMake"
         }
-        Write-Host "CMake generation successful!"
-    } catch {
-        throw "CMake generation failed: $_"
     }
+    
+    $opusDir = Join-Path $DepsDir "opus"
+    if (Test-Path $opusDir) {
+        $opusInclude = Join-Path $opusDir "include"
+        $opusLib = Join-Path $opusDir "lib"
+        if ((Test-Path $opusInclude) -and (Test-Path $opusLib)) {
+            $cmakeArgs += "-DOPUS_INCLUDE_DIR=$opusInclude"
+            $cmakeArgs += "-DOPUS_LIBRARY_DIR=$opusLib"
+            Write-Host "Added Opus paths to CMake"
+        }
+    }
+    
+    # Add Windows SDK path if available
+    $windowsSDKDir = Join-Path $DepsDir "WindowsSDK"
+    if (Test-Path $windowsSDKDir) {
+        $cmakeArgs += "-DWINDOWS_SDK_DIR=$windowsSDKDir"
+        Write-Host "Added Windows SDK path to CMake"
+    }
+    
+    # Set configuration-specific options
+    $cmakeArgs += "-DCMAKE_BUILD_TYPE=$Configuration"
+    
+    # Ensure CMake is available
+    if (-not $script:CMakeExe) {
+        $cmakeDir = Join-Path $DepsDir "cmake"
+        $script:CMakeExe = Join-Path $cmakeDir "bin\cmake.exe"
+        if (-not (Test-Path $script:CMakeExe)) {
+            throw "CMake not found. Please run without -SkipDeps first to download dependencies."
+        }
+    }
+    
+    Write-Host "Running CMake with arguments:"
+    Write-Host "  $($cmakeArgs -join ' ')"
+    
+    # Run CMake
+    & $script:CMakeExe @cmakeArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "CMake generation failed with exit code $LASTEXITCODE"
+    }
+    
+    Write-Status "CMake generation completed successfully!"
 }
 
 function Invoke-Build {
     Write-Status "Building Zandronum..."
     
-    $buildPlatformDir = Join-Path $BuildDir $Platform
-    Set-Location $buildPlatformDir
-    
+    # Use CMake to build
     $buildArgs = @(
-        "--build", "."
-        "--config", $Configuration
+        "--build", $BuildDir,
+        "--config", $Configuration,
         "--parallel"
     )
     
-    Write-Host "Running: $script:CMakeExe $($buildArgs -join ' ')"
+    Write-Host "Running CMake build with arguments:"
+    Write-Host "  $($buildArgs -join ' ')"
     
-    try {
-        & $script:CMakeExe @buildArgs
-        if ($LASTEXITCODE -ne 0) {
-            throw "Build failed with exit code $LASTEXITCODE"
-        }
-        Write-Host "Build successful!"
-    } catch {
-        throw "Build failed: $_"
+    & $script:CMakeExe @buildArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Build failed with exit code $LASTEXITCODE"
     }
+    
+    Write-Status "Build completed successfully!"
 }
 
 function Show-Results {
-    Write-Status "Build completed!"
+    Write-Status "Build Results:"
     
-    $buildPlatformDir = Join-Path $BuildDir $Platform
-    $outputDir = Join-Path $buildPlatformDir $Configuration
-    
+    $outputDir = Join-Path $BuildDir $Configuration
     if (Test-Path $outputDir) {
-        Write-Host ""
-        Write-Host "Output directory: $outputDir" -ForegroundColor Cyan
+        Write-Host "Output directory: $outputDir"
         
-        $exeFiles = Get-ChildItem $outputDir -Filter "*.exe" -ErrorAction SilentlyContinue
-        if ($exeFiles) {
-            Write-Host "Built executables:" -ForegroundColor Cyan
-            $exeFiles | ForEach-Object {
-                $size = [math]::Round($_.Length / 1MB, 2)
-                Write-Host "  $($_.Name) ($size MB)" -ForegroundColor White
-            }
+        $zandronumExe = Join-Path $outputDir "zandronum.exe"
+        if (Test-Path $zandronumExe) {
+            $fileInfo = Get-Item $zandronumExe
+            Write-Host "  zandronum.exe: $($fileInfo.Length) bytes, modified $($fileInfo.LastWriteTime)"
+        } else {
+            Write-Warning "zandronum.exe not found in output directory"
         }
         
-        $pk3Files = Get-ChildItem $buildPlatformDir -Filter "*.pk3" -ErrorAction SilentlyContinue
-        if ($pk3Files) {
-            Write-Host "Game data files:" -ForegroundColor Cyan
-            $pk3Files | ForEach-Object {
-                $size = [math]::Round($_.Length / 1MB, 2)
-                Write-Host "  $($_.Name) ($size MB)" -ForegroundColor White
+        $zandronumPk3 = Join-Path $outputDir "zandronum.pk3"
+        if (Test-Path $zandronumPk3) {
+            $fileInfo = Get-Item $zandronumPk3
+            Write-Host "  zandronum.pk3: $($fileInfo.Length) bytes, modified $($fileInfo.LastWriteTime)"
+        } else {
+            Write-Warning "zandronum.pk3 not found in output directory"
+        }
+        
+        # List other files in output directory
+        $otherFiles = Get-ChildItem $outputDir -File | Where-Object { $_.Name -notin @("zandronum.exe", "zandronum.pk3") }
+        if ($otherFiles) {
+            Write-Host "  Other files:"
+            foreach ($file in $otherFiles) {
+                Write-Host "    $($file.Name): $($file.Length) bytes"
             }
         }
+    } else {
+        Write-Warning "Output directory not found: $outputDir"
     }
 }
 
