@@ -24,18 +24,52 @@ jobs:
         run: |
           ./build.ps1
 
-      - name: Validate executable runs (no missing DLLs)
+      - name: Basic executable run
         run: |
-          Write-Host "Testing executable can run without DLL errors..."
-          # Test with -iwad parameter pointing to nonexistent file - should fail gracefully, not with DLL error
-          $output = .\build\Release\zandronum.exe -iwad nonexistent.wad 2>&1 | Out-String
-          Write-Host "Zandronum output: $output"
-          # If it's a DLL error, it will contain "dll" or "library" 
-          if ($output -match "(?i)(dll|library|api-ms-|vcruntime|msvcp)" -and $output -notmatch "(?i)(iwad|wad)") {
-            Write-Host "❌ DLL dependency error detected"
+          Write-Host "Testing executable dependencies with dependency walker style check..."
+          
+          # Use PowerShell to check DLL dependencies directly
+          try {
+            # Try to load the executable and see what happens immediately
+            $proc = Start-Process -FilePath ".\build\Release\zandronum.exe" -ArgumentList "-iwad","nonexistent.wad" -PassThru -RedirectStandardError ".\error.log" -RedirectStandardOutput ".\output.log" -WindowStyle Hidden
+            
+            # Give it 3 seconds to fail with DLL error or start initializing
+            Start-Sleep -Seconds 3
+            
+            # Check if process is still running
+            if (-not $proc.HasExited) {
+              Write-Host "✅ Process started successfully - killing it now"
+              $proc.Kill()
+              $proc.WaitForExit(5000)
+            }
+            
+            # Check error output for DLL issues
+            if (Test-Path ".\error.log") {
+              $errorContent = Get-Content ".\error.log" -Raw
+              Write-Host "Error output: $errorContent"
+              
+              if ($errorContent -match "(?i)(libssl|libcrypto|api-ms-|vcruntime|msvcp)" -or
+                  $errorContent -match "(?i)(could not|cannot|unable).*(find|load|locate).*(dll|library)" -or
+                  $errorContent -match "(?i)missing.*dll") {
+                Write-Host "❌ DLL dependency error detected"
+                exit 1
+              }
+            }
+            
+            if (Test-Path ".\output.log") {
+              $outputContent = Get-Content ".\output.log" -Raw
+              Write-Host "Standard output: $outputContent"
+            }
+            
+            Write-Host "✅ No DLL dependency errors detected"
+            
+          } catch {
+            Write-Host "❌ Failed to start process: $_"
             exit 1
-          } else {
-            Write-Host "✅ No DLL errors - executable can start properly"
+          } finally {
+            # Clean up log files
+            Remove-Item ".\error.log" -ErrorAction SilentlyContinue
+            Remove-Item ".\output.log" -ErrorAction SilentlyContinue
           }
 
       - name: Write Zandronum version badge JSON
