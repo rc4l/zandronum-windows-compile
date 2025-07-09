@@ -1,7 +1,7 @@
 # Build artifacts
 deps/
 zandronum/
-build*/
+build/
 
 # Temporary files
 *.tmp
