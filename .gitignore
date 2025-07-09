@@ -2,7 +2,6 @@
 deps/
 zandronum/
 build*/
-context/
 
 # Temporary files
 *.tmp

@@ -1,0 +1,154 @@
+= Prerequisites =
+== Visual Studio ==
+Zandronum requires the Visual Studio 2015 toolchain to be built. Microsoft no longer offers 2015 for (easy) download, but forunately, modern versions of Visual Studio can use older toolchains.
+
+<ol>
+<li>Download [https://visualstudio.microsoft.com/downloads/ Visual Studio 2022 Community].</li>
+
+<li>In the installer, select the '''Desktop development with C++''' workload.
+[[File:Vs2022 cppdevel.png|none]]</li>
+
+<li>On the '''Individual components''' tab, scroll down to the '''Compilers, build tools, and runtimes''' section, and select the '''MSVC v140 - VS 2015 C++ build tools (v14.00)''' and '''C++ Windows XP Support for VS 2017 (v141) tools''' components.</li>
+
+<li>Proceed with the installation.</li>
+</ol>
+
+== CMake ==
+Download the latest version of CMake from [http://cmake.org cmake.org]. We will use this to generate the projects.
+
+== NASM ==
+http://www.nasm.us/
+
+For Visual Studio 2015 or newer, the latest nasm version is required. Currently, this is [http://www.nasm.us/pub/nasm/releasebuilds/2.11.08/nasm-2.11.08.zip Version 2.11.08].
+
+== FMOD Ex ==
+The old FMOD Ex links were removed from the FMOD website, so ZDoom has archived them at https://zdoom.org/files/fmod/.
+
+For Zandronum 3.1, version 4.44.64 is recommended (the final release of FMOD Ex.)
+:Quick Windows link: https://zdoom.org/files/fmod/fmodapi44464win-installer.exe
+
+For Zandronum 3.0, version 4.24.x is required, version 4.24.16 recommended
+:Quick Windows link: https://zdoom.org/files/fmod/fmodapi42416win32-installer.exe
+<!-- IGNORE THIS FOR NOW :x64 platforms use this: https://zdoom.org/files/fmod/fmodapi42416win64-installer.exe -->
+
+== Mercurial ==
+Download the latest version of TortoiseHg for Windows from [https://www.mercurial-scm.org/ the Mercurial website]. This bundle includes Mercurial itself and the TortoiseHg graphical user interface.
+
+Used for downloading the source code and fetching the Mercurial revision ID when compiling the build.
+
+If you wish to build a specific topic, you must enable the <tt>topic</tt> and <tt>evolve</tt> Mercurial extensions. To do so, either:
+* Open TortoiseHg Workbench, go to the File menu -> Settings, open the global settings tab, open the Extensions section, and select the <tt>topic</tt> and <tt>evolve</tt> extensions, then completely exit TortoiseHg Workbench.
+* or, manually add the following to <tt>mercurial.ini</tt> in your user directory:
+  <syntaxhighlight lang="ini">
+[extensions]
+topic = 
+evolve = 
+</syntaxhighlight>
+
+== DirectX SDK ==
+https://wiki.zandronum.com/files/DXSDK_Feb10.exe
+
+Zandronum depends on DirectDraw for software rendering on Windows, so the February 2010 SDK release is required.
+
+== OpenGL Header Files ==
+
+*OpenGL 1.2 and above compatibility profile and extension interfaces: [https://www.khronos.org/registry/OpenGL/api/GL/glext.h glext.h]
+*WGL Extension interfaces: [https://www.khronos.org/registry/OpenGL/api/GL/wglext.h wglext.h]
+
+Note that you may need to put the glext.h and wglext.h into your <tt>C:\Program Files\Microsoft SDKs\Windows\v6.1\includes\gl</tt> folder (create it if it doesn't exist).
+To resolve compiling issues under 'gl_clock.cpp' with _interlockedbittestandset and _interlockedbittestandreset, refer [http://forum.drdteam.org/viewtopic.php?p=43104& here]
+
+== OpenSSL ==
+
+OpenSSL is necessary in order for Zandronum to communicate securely with the account authentication server.
+
+Precompiled binaries for Windows are available from [https://slproweb.com/products/Win32OpenSSL.html Shining Light Productions].  You will want the latest '''non-light''' edition of OpenSSL (both 3.x.x and 1.x.x are known to work) - the description of the correct package mentions "software developers".  You should have a choice between 32-bit and 64-bit versions - you will most likely need the 32-bit version unless you are using CMake and select the 64-bit compiler when generating your build files.
+
+=== Building OpenSSL ===
+
+If the above packages do not work, you can compile OpenSSL yourself. This is a lengthy and complicated process, so be sure that the existing binaries of OpenSSL definitely don't work before you try this.
+
+* Perl is necessary to build OpenSSL. If you don't have Perl installed already, install [http://www.activestate.com/activeperl ActiveState Perl].
+
+* NASM executable directory must be in the host system's <code>PATH</code> environment variable.
+
+* Download and decompress the latest source of [https://www.openssl.org/source/ OpenSSL]. In the source directory call
+
+ perl Configure VC-WIN32 --prefix=c:\Tools\Util\openssl
+ ms\do_nasm
+
+* Replace <code>c:\Tools\Util\openssl</code> with the path where you want OpenSSL to be installed. Then, in the same directory, but within a [http://msdn.microsoft.com/en-us/library/ms229859%28v=vs.110%29.aspx VC++ command prompt], call
+
+ nmake -f ms\nt.mak
+ nmake -f ms\nt.mak test
+ nmake -f ms\nt.mak install
+
+* If an error message 'WinSock32.h does not exist!' is displayed (or the like), you'll need to add these two lines to your console's temporary environment:
+
+ SET INCLUDE=%INCLUDE%;c:\Program Files\Microsoft SDKs\Windows\v7.0\Include\
+ SET LIB=%LIB%;c:\Program Files\Microsoft SDKs\Windows\v7.0\Lib\
+
+== Python ==
+https://www.python.org/downloads/
+
+Version 3.5 or newer is required.
+
+== Opus ==
+
+The Opus audio codec is required for voice chat support.
+
+Download the latest libopus archive from [https://opus-codec.org/downloads/ the Opus website]. Extract the archive, then open the <tt>win32\VS2015\opus.sln</tt> solution (allow Visual Studio to upgrade the projects if necessary). Build the <tt>Release</tt> configuration for the same platform you will build Zandronum for (Win32 or x64).
+
+After building, you will have a static library built under your libopus directory at <tt>win32\VS2015\Win32\Release\opus.lib</tt> or <tt>win32\VS2015\x64\Release\opus.lib</tt>. Pass the full path to the relevant library as the <tt>OPUS_LIBRARIES</tt> variable when it comes time to run CMake. Additionally, pass the libopus <tt>include</tt> folder as <tt>OPUS_INCLUDE_DIR</tt>.
+
+== Zandronum Source Code == 
+And of course, you will require the Zandronum source code to build Zandronum!
+You must clone the source with Mercurial to create a build that is compatible with servers.
+
+In the directory where you want to download the source, right-click on empty space, and go to <code>TortoiseHg &rarr; Clone</code>.
+Enter <code>https://foss.heptapod.net/zandronum/zandronum-stable</code> as the source.
+
+If you want to clone a specific revision, expand ''Options'', check ''Clone to revision'', and enter the revision you want to clone.
+
+For example, if you wanted to download [[Version history/{{LatestVersion}}|Zandronum {{LatestVersion}}]]'s source, you'd enter <code>ZA_{{LatestVersion}}</code>.
+
+== Optional prerequisites ==
+=== Logitech G-Series LCD SDK ===
+Only available with the keyboard drivers from [http://www.logitech.com/ Logitech] hardware.
+
+= Build using Visual Studio =
+== Generate Projects ==
+[[File:Vs2022 cmake.PNG|thumb|right]]
+
+Open CMake (<code>cmake-gui</code>) and set the ''Where is the source code'' textbox to where you downloaded the Zandronum source code. Set ''Where to build the binaries'' to wherever you want the project files to be generated.
+Click ''Configure'' and a dialog will pop up.
+
+* Set the generator to '''Visual Studio 17 2022'''.
+* Set the platform to '''Win32''' for a 32-bit build or '''x64''' for a 64-bit build.
+* Set the toolset to '''v140_xp'''.
+
+If it says there was an error, ignore it as we will solve it now.
+Make sure you set up all prerequisites correctly, and point CMake to the location of any missing paths. Select the '''Advanced''' and '''Grouped''' checkboxes to reveal and group all options.
+
+Then click ''Configure'' again, and point CMake to missing paths.
+<code>LIB_EAY</code> and <code>SSL_EAY</code> are OpenSSL libraries.
+YASM is unneeded as we already have NASM.
+
+[[File:PSVSGuide CMake Complete.png|none|thumb|300x300px|Your CMake should look like this]]
+
+Click ''Configure'' again and your CMake should look like the image on the left.
+Now click ''Generate''. This will generate the project files.
+
+== Build Zandronum ==
+Now go to where you generated the project files and open <code>Zandronum.sln</code>.
+
+At the top, there will be a ''Build'' menu. Click it and click ''Build Solution''.
+
+[[Image:PSVSGuide_Building.png]]
+
+Now wait for Zandronum to build. It is a large project and will take time to build. 
+
+If you encounter an error, see [[#Troubleshooting|Troubleshooting]] below.
+
+Once successfully compiled, <code>zandronum.exe</code> will be in the <code>Debug</code> folder in the project directory.
+<code>zandronum.pk3</code> will be in the project directory.

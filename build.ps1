@@ -1149,6 +1149,36 @@ function Invoke-Build {
         Write-Warning "FMOD directory not set or not found. FMOD DLLs not copied."
     }
     
+    # Copy Freedoom WAD files to output directory if they don't exist
+    $freedoomSourceDir = Join-Path $ToolsDir "freedoom"
+    $freedoom2Source = Join-Path $freedoomSourceDir "freedoom2.wad"
+    $freedoom1Source = Join-Path $freedoomSourceDir "freedoom1.wad"
+    
+    if (Test-Path $outputDir) {
+        $freedoom2Dest = Join-Path $outputDir "freedoom2.wad"
+        $freedoom1Dest = Join-Path $outputDir "freedoom1.wad"
+        
+        # Copy freedoom2.wad if source exists and destination doesn't
+        if ((Test-Path $freedoom2Source) -and (-not (Test-Path $freedoom2Dest))) {
+            Copy-Item $freedoom2Source $freedoom2Dest -Force
+            Write-Host "Copied freedoom2.wad to output directory"
+        } elseif (-not (Test-Path $freedoom2Source)) {
+            Write-Warning "Freedoom2.wad not found at: $freedoom2Source"
+        } elseif (Test-Path $freedoom2Dest) {
+            Write-Host "freedoom2.wad already exists in output directory"
+        }
+        
+        # Copy freedoom1.wad if source exists and destination doesn't
+        if ((Test-Path $freedoom1Source) -and (-not (Test-Path $freedoom1Dest))) {
+            Copy-Item $freedoom1Source $freedoom1Dest -Force
+            Write-Host "Copied freedoom1.wad to output directory"
+        } elseif (-not (Test-Path $freedoom1Source)) {
+            Write-Warning "Freedoom1.wad not found at: $freedoom1Source"
+        } elseif (Test-Path $freedoom1Dest) {
+            Write-Host "freedoom1.wad already exists in output directory"
+        }
+    }
+    
     Write-Status "Build completed successfully!"
 }
 

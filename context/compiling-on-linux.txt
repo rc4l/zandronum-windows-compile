@@ -1,0 +1,152 @@
+'''Open a terminal and copy and paste the whole code box for each step.'''
+
+== Install dependencies ==
+[http://zandronum.com/ Zandronum] needs certain tools and development files in order to compile:
+* '''Required'''
+** gcc 4.6 or later
+** make
+** cmake 2.8.7 or later
+** SDL 1.2.8 or later 1.2.x versions
+** libGL and libGLU ''(SDL or libSDL pull in libGLU)'' or any other GL implementation provider.
+** [http://zandronum.com/essentials/fmod/ FMOD Ex] 4.44.64
+** libopenssl ''(for Zandronum 1.3 or later)''
+** libopus ''(for Zandronum 3.2 or later)''
+* '''Recommended'''
+** GTK2
+** mercurial ''(needed in order to [https://foss.heptapod.net/zandronum/zandronum-stable download the source] and compile in commit meta data)''
+*** mercurial-evolve ''(optional, includes the <tt>topic</tt> and <tt>evolve</tt> extensions, which are needed only if you intend to compile a specific topic. Some distros may include these as part of their base Mercurial package)''
+** nasm 0.98.39 or later ''(x86-32 only)''
+* '''Optional'''
+** zlib ''(Zandronum has a copy of it and will be statically compiled in if not found)''
+** libbzip2 ''(possibly static)''
+** libjpeg ''(possibly static)''
+* '''Runtime'''
+** gxmessage ''(optional - needed to show the crash log in a window)''
+** kdialog ''(optional - for KDE users)''
+** fluidsynth or timidity ''(optional - for [http://zdoom.org/wiki/MIDI MIDI] playback)''
+
+=== Debian/Ubuntu ===
+<pre>
+sudo apt-get install g++ make cmake libsdl1.2-compat-dev mercurial mercurial-evolve zlib1g-dev \
+libbz2-dev libjpeg-dev libfluidsynth-dev libgtk2.0-dev timidity nasm \
+libgl1-mesa-dev libssl-dev tar libglew-dev libopus-dev
+</pre>
+
+=== Fedora ===
+<pre>
+dnf install gcc-c++ make cmake SDL-devel mercurial zlib-devel \
+bzip2-devel libjpeg-turbo-devel fluidsynth-devel gtk2-devel timidity++ nasm \
+mesa-libGL-devel openssl-devel glew glew-devel tar opus
+</pre>
+
+=== openSUSE ===
+<pre>
+zypper install gcc-c++ make cmake libSDL-devel mercurial zlib-devel \
+libbz2-devel libjpeg-devel fluidsynth-devel gtk2-devel timidity nasm \
+Mesa-libGL-devel libopenssl-devel tar glew glew-devel libopus-devel
+</pre>
+
+=== Arch Linux ===
+<pre>
+pacman -S --needed gcc make cmake sdl12-compat mercurial zlib bzip2 libjpeg-turbo \
+fluidsynth gtk2 timidity++ nasm mesa glu openssl tar glew opus
+</pre>
+
+== Enable Mercurial extensions ==
+'''This section is optional''', and is required only if you intend to build a specific topic. Doing so requires the <tt>topic</tt> and <tt>evolve</tt> extensions to be enabled. Some distros may package these separately from the base Mercurial package, so check your package manager. Alternatively, it is possible to install evolve from the Python Package Index, see [https://foss.heptapod.net/mercurial/evolve/-/blob/branch/default/README.rst the evolve readme] for more information.
+
+Add the following to the <tt>extensions</tt> section of <tt>~/.hgrc</tt>:
+
+<syntaxhighlight lang="ini">
+[extensions]
+topic = 
+evolve = 
+</syntaxhighlight>
+
+== Clone source repository ==
+Clone the Zandronum source repository, and change your working directory to it:
+
+<pre>
+hg clone https://foss.heptapod.net/zandronum/zandronum-stable
+cd zandronum-stable
+</pre>
+
+== Check out desired version ==
+
+=== Stable release ===
+
+Tags are available for stable releases of Zandronum.
+See [[Version history]] for all releases and their tags.
+For example, to check out the latest stable release ([[Version history/{{LatestVersion}}|{{LatestVersion}}]]), use:
+
+ hg update ZA_{{LatestVersion}}
+{{#if:{{LatestBeta}}:
+
+=== Latest beta release ===
+
+Currently, no tags are available for beta releases. To check out a beta, you must find its changeset hash. A table of betas and their hashes is available on the relevant article for that version - for the current beta release, see [[Version history/{{LatestBeta}}#Beta builds|here]].
+
+For example, to check out the latest beta release ([[Version history/{{LatestBeta}}|{{LatestBeta}}]]), use:
+
+ hg update {{LatestBetaChangeset}}
+}}
+
+== Build client ==
+
+=== Download FMOD ===
+
+Download FMOD 4.44.64 and extract the files:
+
+<pre>
+wget https://zandronum.com/essentials/fmod/fmodapi44464linux.tar.gz
+tar xf fmodapi44464linux.tar.gz
+</pre>
+
+Make a note of where you extracted FMOD.
+
+=== Compile ===
+
+In the directory where you cloned Zandronum, create and move into a directory for the build files:
+
+ mkdir buildclient
+ cd buildclient
+
+Then, use CMake to generate the Makefiles.
+
+Replace <code>/path/to/fmodapi44464linux</code> in the commands below with where you extracted FMOD.
+
+ cmake \
+  -DFMOD_LIBRARY=/path/to/fmodapi44464linux/api/lib/libfmodex64-4.44.64.so \
+  -DFMOD_INCLUDE_DIR=/path/to/fmodapi44464linux/api/inc \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON \
+  ..
+
+Then build:
+
+ make -j`nproc`
+
+A <code>zandronum</code> binary will be output to the build directory.
+
+== Build server-only ==
+
+Note that the client build is also a server build when using the <code>-host</code> command-line parameter. If you built a client above, then '''building server-only is unneccesary'''.
+
+Return to the directory which Zandronum was cloned to, and create and move into another directory for building:
+
+ mkdir buildserver
+ cd buildserver
+
+Then, use CMake to generate the Makefiles:
+ cmake \
+  -DSERVERONLY=ON \
+  -DCMAKE_BUILD_TYPE=Release \
+  ..
+
+Then build:
+
+ make -j`nproc`
+
+A <code>zandronum-server</code> binary will be output to the build directory.
+
+[[Category:Build guides]]

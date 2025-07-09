@@ -1,0 +1,9 @@
+Analyze the compiling linux, and compiling windows. Let me know when you're done. We are trying to compile Zandronum on windows within a single script using a terminal only with no arguments or any nonsense. Just run and go. There are some unbreakable rules:
+
+1. We want a touchless approach meaning no patching or modifying the Zandronum source code no matter what.
+2. We want to maintain portability so nothing can be hardcoded for a path nor should it ever install anything "globally" on your windows machine.
+3. We want to create a system where it's a one-stop-shop to compile zandronum on windows. There should be no compromises whatsoever. No skipping fmod, or anything.
+4. For source control we will try to use git and github using https://github.com/TorrSamaho/zandronum
+5. The end result should involve a successful windows build of Zandronum for windows with no compromises. And eventually a ready-to-use workspace for vscode so developers can just go start coding.
+
+Got it? For now research solutions thoroughly and find me good answers.
