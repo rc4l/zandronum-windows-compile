@@ -1218,6 +1218,13 @@ function Invoke-CMakeGenerate {
         Write-Host "Added Windows SDK path to CMake"
     }
     
+    # Set Python executable if portable Python is available
+    # This ensures CMake finds the correct Python when no system Python is installed
+    if ($script:PythonExe -and (Test-Path $script:PythonExe)) {
+        $cmakeArgs += "-DPYTHON_EXECUTABLE=$($script:PythonExe)"
+        Write-Host "Added Python executable to CMake: $($script:PythonExe)"
+    }
+    
     # Set configuration-specific options
     $cmakeArgs += "-DCMAKE_BUILD_TYPE=$Configuration"
     
