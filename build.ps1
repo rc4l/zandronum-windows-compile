@@ -51,7 +51,7 @@ $ToolsDir = Join-Path $ScriptRoot "tools"
 $Dependencies = @{
     SevenZip = @{
         Version = "25.00"
-        Url = "https://www.7-zip.org/a/7zr.exe"
+        Url = "https://www.7-zip.org/a/7z2500-x64.zip"
         ExtractPath = "7zip"
     }
     CMake = @{
@@ -122,13 +122,71 @@ function Invoke-Download {
     )
     
     Write-Status "Downloading: $Url"
-    try {
-        $webClient = New-Object System.Net.WebClient
-        $webClient.DownloadFile($Url, $OutputPath)
-        Write-Host "Downloaded to: $OutputPath"
-    } catch {
-        throw "Failed to download $Url`: $_"
+    
+    # Ensure output directory exists
+    $outputDir = Split-Path $OutputPath -Parent
+    if (-not (Test-Path $outputDir)) {
+        New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     }
+    
+    # Configure security protocols and settings
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
+    [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    [Net.ServicePointManager]::CheckCertificateRevocationList = $false
+    
+    $attempts = @(
+        {
+            Write-Host "Trying BITS transfer..."
+            Start-BitsTransfer -Source $Url -Destination $OutputPath -ErrorAction Stop
+        },
+        {
+            Write-Host "Trying Invoke-WebRequest with modern settings..."
+            $webRequest = Invoke-WebRequest -Uri $Url -OutFile $OutputPath -UseBasicParsing -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -TimeoutSec 300
+        },
+        {
+            Write-Host "Trying Invoke-WebRequest with relaxed SSL..."
+            $webRequest = Invoke-WebRequest -Uri $Url -OutFile $OutputPath -UseBasicParsing -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -SkipCertificateCheck -TimeoutSec 300 2>$null
+        },
+        {
+            Write-Host "Trying WebClient with custom headers..."
+            $webClient = New-Object System.Net.WebClient
+            $webClient.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            $webClient.DownloadFile($Url, $OutputPath)
+        },
+        {
+            Write-Host "Trying curl if available..."
+            if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+                & curl.exe -L -o $OutputPath $Url --tlsv1.2 --ssl-allow-beast --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                if ($LASTEXITCODE -ne 0) { throw "curl failed" }
+            } else {
+                throw "curl not available"
+            }
+        }
+    )
+    
+    foreach ($attempt in $attempts) {
+        try {
+            & $attempt
+            if (Test-Path $OutputPath) {
+                $fileSize = (Get-Item $OutputPath).Length
+                if ($fileSize -gt 0) {
+                    Write-Host "Successfully downloaded $([math]::Round($fileSize / 1MB, 2)) MB to: $OutputPath"
+                    return
+                } else {
+                    Remove-Item $OutputPath -Force -ErrorAction SilentlyContinue
+                    throw "Downloaded file is empty"
+                }
+            } else {
+                throw "File not created"
+            }
+        } catch {
+            Write-Warning "Download attempt failed: $_"
+            Remove-Item $OutputPath -Force -ErrorAction SilentlyContinue
+            continue
+        }
+    }
+    
+    throw "All download methods failed for $Url"
 }
 
 function Expand-Archive7Zip {
@@ -141,30 +199,38 @@ function Expand-Archive7Zip {
         New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
     }
     
-    # Try using built-in Expand-Archive first for simple ZIP files
-    if ($ArchivePath -like "*.zip") {
-        try {
-            Expand-Archive -Path $ArchivePath -DestinationPath $DestinationPath -Force
-            return
-        } catch {
-            Write-Warning "Built-in Expand-Archive failed, trying 7-Zip"
+    # Use our portable 7-Zip first (supports more formats than built-in)
+    if ($script:SevenZipExe -and (Test-Path $script:SevenZipExe)) {
+        Write-Host "Using 7zr.exe to extract: $ArchivePath"
+        & $script:SevenZipExe x $ArchivePath "-o$DestinationPath" -y
+        if ($LASTEXITCODE -eq 0) { 
+            Write-Host "7zr.exe extraction successful"
+            return 
+        } else {
+            Write-Warning "7zr.exe extraction failed with exit code: $LASTEXITCODE"
         }
     }
     
-    # Use our portable 7-Zip
-    if ($script:SevenZipExe -and (Test-Path $script:SevenZipExe)) {
-        & $script:SevenZipExe x $ArchivePath "-o$DestinationPath" -y
-        if ($LASTEXITCODE -eq 0) { return }
+    # Try using built-in Expand-Archive for simple ZIP files as fallback
+    if ($ArchivePath -like "*.zip") {
+        try {
+            Write-Host "Trying built-in Expand-Archive as fallback"
+            Expand-Archive -Path $ArchivePath -DestinationPath $DestinationPath -Force
+            return
+        } catch {
+            Write-Warning "Built-in Expand-Archive failed: $_"
+        }
     }
     
     # Fallback to system 7-Zip if available
     $sevenZip = Get-Command "7z.exe" -ErrorAction SilentlyContinue
     if ($sevenZip) {
+        Write-Host "Trying system 7z.exe as last resort"
         & $sevenZip.Source x $ArchivePath "-o$DestinationPath" -y
         if ($LASTEXITCODE -eq 0) { return }
     }
     
-    throw "Failed to extract $ArchivePath"
+    throw "Failed to extract $ArchivePath - all extraction methods failed"
 }
 
 function Find-VisualStudio {
@@ -211,23 +277,27 @@ function Initialize-Directories {
 
 function Get-SevenZip {
     $sevenZipDir = Join-Path $DepsDir "7zip"
-    $sevenZipExe = Join-Path $sevenZipDir "7zr.exe"
+    $sevenZipExe = Join-Path $sevenZipDir "7z.exe"
     
     if (Test-Path $sevenZipExe) {
         Write-Host "7-Zip already exists at: $sevenZipExe"
         return $sevenZipExe
     }
     
-    Write-Status "Setting up portable 7-Zip..."
+    Write-Status "Setting up 7-Zip (full version for NSIS support)..."
     
     # Create directory for 7-Zip
     if (-not (Test-Path $sevenZipDir)) {
         New-Item -ItemType Directory -Path $sevenZipDir -Force | Out-Null
     }
     
-    # Download 7zr.exe directly - it's a standalone executable
-    $sevenZipUrl = $Dependencies.SevenZip.Url
-    Invoke-Download $sevenZipUrl $sevenZipExe
+    # Download full 7-Zip for NSIS support
+    $sevenZipZip = Join-Path $DepsDir "7zip.zip"
+    $sevenZipUrl = "https://www.7-zip.org/a/7z2500-x64.zip"
+    
+    Invoke-Download $sevenZipUrl $sevenZipZip
+    Expand-Archive -Path $sevenZipZip -DestinationPath $sevenZipDir -Force
+    Remove-Item $sevenZipZip -Force -ErrorAction SilentlyContinue
     
     if (Test-Path $sevenZipExe) {
         Write-Host "7-Zip ready at: $sevenZipExe"
@@ -462,9 +532,16 @@ function Get-FMOD {
     }
     
     Write-Status "Setting up FMOD..."
-    $fmodInstaller = Join-Path $DepsDir "fmod-installer.exe"
+    $fmodInstaller = Join-Path $DepsDir "fmodapi44464win-installer.exe"
     
-    Invoke-Download $Dependencies.FMOD.Url $fmodInstaller
+    # Always try to download FMOD - no compromises!
+    if (-not (Test-Path $fmodInstaller)) {
+        Write-Host "Downloading FMOD Ex 4.44.64 installer..."
+        Invoke-Download $Dependencies.FMOD.Url $fmodInstaller
+        Write-Host "FMOD download successful!"
+    } else {
+        Write-Host "Using existing FMOD installer: $fmodInstaller"
+    }
     
     # Create extraction directory
     if (-not (Test-Path $fmodDir)) {
@@ -476,45 +553,70 @@ function Get-FMOD {
     $tempExtractDir = Join-Path $DepsDir "fmod_temp"
     
     try {
+        # Clean up any previous extraction attempts
+        if (Test-Path $tempExtractDir) {
+            Remove-Item $tempExtractDir -Recurse -Force
+        }
+        
         # Extract the installer
+        Write-Host "Running 7-Zip extraction..."
         Expand-Archive7Zip $fmodInstaller $tempExtractDir
+        
+        Write-Host "Extraction completed. Looking for FMOD API files..."
+        
+        # List contents to see what we got
+        if (Test-Path $tempExtractDir) {
+            Write-Host "Extracted contents:"
+            Get-ChildItem $tempExtractDir -Recurse | ForEach-Object {
+                Write-Host "  $($_.FullName.Replace($tempExtractDir, ''))"
+            }
+        }
         
         # Find the FMOD API files in the extracted content
         # FMOD installers typically have a structure like api/inc and api/lib
         $apiDir = Get-ChildItem $tempExtractDir -Recurse -Directory -Name "api" | Select-Object -First 1
         if ($apiDir) {
             $fullApiPath = Join-Path $tempExtractDir $apiDir
+            Write-Host "Found API directory at: $fullApiPath"
             
             # Copy include files
             $incDir = Join-Path $fullApiPath "inc"
             if (Test-Path $incDir) {
                 Copy-Item $incDir $fmodIncludeDir -Recurse -Force
-                Write-Host "Copied FMOD headers"
+                Write-Host "Copied FMOD headers from: $incDir"
             }
             
             # Copy library files  
             $libDir = Join-Path $fullApiPath "lib"
             if (Test-Path $libDir) {
                 Copy-Item $libDir $fmodLibDir -Recurse -Force
-                Write-Host "Copied FMOD libraries"
+                Write-Host "Copied FMOD libraries from: $libDir"
             }
         } else {
             # Fallback: look for any include/lib directories
-            $includeSearch = Get-ChildItem $tempExtractDir -Recurse -Directory -Name "*inc*" | Select-Object -First 1
-            $libSearch = Get-ChildItem $tempExtractDir -Recurse -Directory -Name "*lib*" | Select-Object -First 1
+            Write-Host "API directory not found, searching for inc/lib directories..."
+            $includeSearch = Get-ChildItem $tempExtractDir -Recurse -Directory | Where-Object { $_.Name -like "*inc*" } | Select-Object -First 1
+            $libSearch = Get-ChildItem $tempExtractDir -Recurse -Directory | Where-Object { $_.Name -like "*lib*" } | Select-Object -First 1
             
             if ($includeSearch) {
-                Copy-Item (Join-Path $tempExtractDir $includeSearch) $fmodIncludeDir -Recurse -Force
-                Write-Host "Copied FMOD headers from: $includeSearch"
+                Copy-Item $includeSearch.FullName $fmodIncludeDir -Recurse -Force
+                Write-Host "Copied FMOD headers from: $($includeSearch.FullName)"
             }
             if ($libSearch) {
-                Copy-Item (Join-Path $tempExtractDir $libSearch) $fmodLibDir -Recurse -Force  
-                Write-Host "Copied FMOD libraries from: $libSearch"
+                Copy-Item $libSearch.FullName $fmodLibDir -Recurse -Force
+                Write-Host "Copied FMOD libraries from: $($libSearch.FullName)"
+            }
+            
+            if (-not $includeSearch -and -not $libSearch) {
+                Write-Warning "Could not find FMOD include or library directories in extracted content"
+                Write-Host "Available directories:"
+                Get-ChildItem $tempExtractDir -Recurse -Directory | ForEach-Object {
+                    Write-Host "  $($_.FullName)"
+                }
             }
         }
         
         # Clean up temporary files
-        Remove-Item $fmodInstaller -Force -ErrorAction SilentlyContinue
         Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
         
         if (Test-Path $fmodIncludeDir) {
@@ -525,6 +627,8 @@ function Get-FMOD {
         }
         
     } catch {
+        # Clean up on failure
+        Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
         throw "Failed to setup FMOD: $_"
     }
 }
