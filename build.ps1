@@ -83,11 +83,6 @@ $Dependencies = @{
         Url = "https://www.python.org/ftp/python/3.12.1/python-3.12.1-embed-amd64.zip"
         ExtractPath = "python"
     }
-    Opus = @{
-        Version = "1.5.2"
-        Url = "https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz"
-        ExtractPath = "opus-1.5.2"
-    }
 }
 
 # Logging functions
@@ -865,16 +860,27 @@ function Get-Opus {
     }
     
     Write-Status "Setting up Opus..."
-    $opusArchive = Join-Path $DepsDir "opus-1.5.2.tar.gz"
     
-    # Download Opus source
-    if (-not (Test-Path $opusArchive)) {
-        Write-Host "Downloading Opus 1.5.2 source..."
-        Invoke-Download $Dependencies.Opus.Url $opusArchive
-        Write-Host "Opus download successful!"
-    } else {
-        Write-Host "Using existing Opus archive: $opusArchive"
+    # Check for committed Opus file
+    $opusToolsDir = Join-Path $ScriptRoot "tools\opus"
+    $committedOpus = $null
+    if (Test-Path $opusToolsDir) {
+        # Look for any compressed file in tools/opus directory
+        $compressedFiles = Get-ChildItem $opusToolsDir -File | Where-Object { $_.Extension -in @('.tar.gz', '.zip', '.7z', '.tar', '.gz') }
+        if ($compressedFiles) {
+            $committedOpus = $compressedFiles[0].FullName
+            Write-Host "Found committed Opus archive: $($compressedFiles[0].Name)"
+        }
     }
+    
+    if (-not $committedOpus) {
+        throw "Opus archive not found in tools/opus/ directory. Please place an Opus source archive (opus-*.tar.gz) in tools/opus/ before running the build."
+    }
+    
+    # Use committed file
+    $opusArchive = Join-Path $DepsDir (Split-Path $committedOpus -Leaf)
+    Copy-Item $committedOpus $opusArchive -Force
+    Write-Host "Using committed Opus archive: $opusArchive"
     
     # Extract Opus using 7-Zip
     Write-Host "Extracting Opus using 7-Zip..."
