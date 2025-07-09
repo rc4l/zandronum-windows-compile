@@ -6,6 +6,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -44,8 +46,6 @@ jobs:
           GH_PAT: ${{ secrets.GH_PAT }}
       - name: Push badge files to badges branch
         if: ${{ success() }}
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -53,7 +53,7 @@ jobs:
           git checkout -B badges
           git add build-date-badge.json zandronum-version-badge.json
           git commit -m "Update badges" || exit 0
-          Write-Host "Setting remote URL with token..."
-          git remote set-url origin "https://x-access-token:$env:GH_PAT@github.com/${{ github.repository }}"
+          Write-Host "Setting remote URL with GITHUB_TOKEN..."
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
           Write-Host "Pushing to badges branch..."
           git push origin badges --force
