@@ -1,0 +1,52 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}/src/zandronum/src",
+                "${workspaceFolder}/src/zandronum/src/win32",
+                "${workspaceFolder}/src/zandronum/src/sdl",
+                "${workspaceFolder}/src/zandronum/gdtoa",
+                "${workspaceFolder}/src/zandronum/lzma/C",
+                "${workspaceFolder}/src/zandronum/bzip2",
+                "${workspaceFolder}/src/zandronum/game-music-emu",
+                "${workspaceFolder}/src/zandronum/jpeg-6b",
+                "${workspaceFolder}/src/zandronum/zlib",
+                "${workspaceFolder}/deps/fmod/include",
+                "${workspaceFolder}/deps/openssl/include",
+                "${workspaceFolder}/deps/opus/include",
+                "${workspaceFolder}/build",
+                "${workspaceFolder}/**"
+            ],
+            "defines": [
+                "_DEBUG",
+                "_WIN32",
+                "WIN32",
+                "UNICODE",
+                "_UNICODE",
+                "_CRT_SECURE_NO_WARNINGS",
+                "_CRT_NONSTDC_NO_DEPRECATE",
+                "HAVE_FLUIDSYNTH",
+                "HAVE_OPL",
+                "HAVE_SNDFILE",
+                "DYN_FLUIDSYNTH",
+                "DYN_OPENAL",
+                "DYN_SNDFILE",
+                "ZANDRONUM"
+            ],
+            "windowsSdkVersion": "10.0.22621.0",
+            "compilerPath": "cl.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "windows-msvc-x64",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/src/zandronum",
+                    "${workspaceFolder}/deps"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
+        }
+    ],
+    "version": 4
+}
