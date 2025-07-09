@@ -49,6 +49,11 @@ $ToolsDir = Join-Path $ScriptRoot "tools"
 
 # Dependency versions and URLs
 $Dependencies = @{
+    SevenZip = @{
+        Version = "25.00"
+        Url = "https://www.7-zip.org/a/7zr.exe"
+        ExtractPath = "7zip"
+    }
     CMake = @{
         Version = "3.28.1"
         Url = "https://github.com/Kitware/CMake/releases/download/v3.28.1/cmake-3.28.1-windows-x86_64.zip"
@@ -136,15 +141,23 @@ function Expand-Archive7Zip {
         New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
     }
     
-    # Try using built-in Expand-Archive first
-    try {
-        Expand-Archive -Path $ArchivePath -DestinationPath $DestinationPath -Force
-        return
-    } catch {
-        Write-Warning "Built-in Expand-Archive failed, trying alternative methods"
+    # Try using built-in Expand-Archive first for simple ZIP files
+    if ($ArchivePath -like "*.zip") {
+        try {
+            Expand-Archive -Path $ArchivePath -DestinationPath $DestinationPath -Force
+            return
+        } catch {
+            Write-Warning "Built-in Expand-Archive failed, trying 7-Zip"
+        }
     }
     
-    # Try 7-Zip if available
+    # Use our portable 7-Zip
+    if ($script:SevenZipExe -and (Test-Path $script:SevenZipExe)) {
+        & $script:SevenZipExe x $ArchivePath "-o$DestinationPath" -y
+        if ($LASTEXITCODE -eq 0) { return }
+    }
+    
+    # Fallback to system 7-Zip if available
     $sevenZip = Get-Command "7z.exe" -ErrorAction SilentlyContinue
     if ($sevenZip) {
         & $sevenZip.Source x $ArchivePath "-o$DestinationPath" -y
@@ -193,6 +206,34 @@ function Initialize-Directories {
             New-Item -ItemType Directory -Path $_ -Force | Out-Null
             Write-Host "Created: $_"
         }
+    }
+}
+
+function Get-SevenZip {
+    $sevenZipDir = Join-Path $DepsDir "7zip"
+    $sevenZipExe = Join-Path $sevenZipDir "7zr.exe"
+    
+    if (Test-Path $sevenZipExe) {
+        Write-Host "7-Zip already exists at: $sevenZipExe"
+        return $sevenZipExe
+    }
+    
+    Write-Status "Setting up portable 7-Zip..."
+    
+    # Create directory for 7-Zip
+    if (-not (Test-Path $sevenZipDir)) {
+        New-Item -ItemType Directory -Path $sevenZipDir -Force | Out-Null
+    }
+    
+    # Download 7zr.exe directly - it's a standalone executable
+    $sevenZipUrl = $Dependencies.SevenZip.Url
+    Invoke-Download $sevenZipUrl $sevenZipExe
+    
+    if (Test-Path $sevenZipExe) {
+        Write-Host "7-Zip ready at: $sevenZipExe"
+        return $sevenZipExe
+    } else {
+        throw "Failed to setup 7-Zip"
     }
 }
 
@@ -410,6 +451,84 @@ function Get-ZandronumSource {
     throw "Failed to obtain Zandronum source code"
 }
 
+function Get-FMOD {
+    $fmodDir = Join-Path $DepsDir "fmod"
+    $fmodIncludeDir = Join-Path $fmodDir "include"
+    $fmodLibDir = Join-Path $fmodDir "lib"
+    
+    if (Test-Path $fmodIncludeDir) {
+        Write-Host "FMOD already exists at: $fmodDir"
+        return $fmodDir
+    }
+    
+    Write-Status "Setting up FMOD..."
+    $fmodInstaller = Join-Path $DepsDir "fmod-installer.exe"
+    
+    Invoke-Download $Dependencies.FMOD.Url $fmodInstaller
+    
+    # Create extraction directory
+    if (-not (Test-Path $fmodDir)) {
+        New-Item -ItemType Directory -Path $fmodDir -Force | Out-Null
+    }
+    
+    # Extract FMOD installer using 7-Zip
+    Write-Host "Extracting FMOD using 7-Zip..."
+    $tempExtractDir = Join-Path $DepsDir "fmod_temp"
+    
+    try {
+        # Extract the installer
+        Expand-Archive7Zip $fmodInstaller $tempExtractDir
+        
+        # Find the FMOD API files in the extracted content
+        # FMOD installers typically have a structure like api/inc and api/lib
+        $apiDir = Get-ChildItem $tempExtractDir -Recurse -Directory -Name "api" | Select-Object -First 1
+        if ($apiDir) {
+            $fullApiPath = Join-Path $tempExtractDir $apiDir
+            
+            # Copy include files
+            $incDir = Join-Path $fullApiPath "inc"
+            if (Test-Path $incDir) {
+                Copy-Item $incDir $fmodIncludeDir -Recurse -Force
+                Write-Host "Copied FMOD headers"
+            }
+            
+            # Copy library files  
+            $libDir = Join-Path $fullApiPath "lib"
+            if (Test-Path $libDir) {
+                Copy-Item $libDir $fmodLibDir -Recurse -Force
+                Write-Host "Copied FMOD libraries"
+            }
+        } else {
+            # Fallback: look for any include/lib directories
+            $includeSearch = Get-ChildItem $tempExtractDir -Recurse -Directory -Name "*inc*" | Select-Object -First 1
+            $libSearch = Get-ChildItem $tempExtractDir -Recurse -Directory -Name "*lib*" | Select-Object -First 1
+            
+            if ($includeSearch) {
+                Copy-Item (Join-Path $tempExtractDir $includeSearch) $fmodIncludeDir -Recurse -Force
+                Write-Host "Copied FMOD headers from: $includeSearch"
+            }
+            if ($libSearch) {
+                Copy-Item (Join-Path $tempExtractDir $libSearch) $fmodLibDir -Recurse -Force  
+                Write-Host "Copied FMOD libraries from: $libSearch"
+            }
+        }
+        
+        # Clean up temporary files
+        Remove-Item $fmodInstaller -Force -ErrorAction SilentlyContinue
+        Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+        
+        if (Test-Path $fmodIncludeDir) {
+            Write-Host "FMOD ready at: $fmodDir"
+            return $fmodDir
+        } else {
+            throw "Failed to extract FMOD include files"
+        }
+        
+    } catch {
+        throw "Failed to setup FMOD: $_"
+    }
+}
+
 function Initialize-Dependencies {
     Write-Status "Setting up dependencies..."
     
@@ -432,10 +551,12 @@ function Initialize-Dependencies {
     }
     
     # Get essential tools
+    $script:SevenZipExe = Get-SevenZip
     $script:CMakeExe = Get-CMake
     $script:NASMExe = Get-NASM
     $script:PythonExe = Get-Python
     $script:WindowsSDK = Get-WindowsSDK
+    $script:FMODDir = Get-FMOD
     
     if (-not $script:WindowsSDK) {
         Write-Warning "Windows SDK with DirectX headers not found. Build may fail."
@@ -470,8 +591,15 @@ function Invoke-CMakeGenerate {
     )
     
     # Add dependency paths when available
-    # For now, we'll configure basic CMake generation
-    # TODO: Add FMOD, OpenSSL, etc. paths when those dependencies are implemented
+    if ((Test-Path variable:script:FMODDir) -and $script:FMODDir -and (Test-Path $script:FMODDir)) {
+        $fmodInclude = Join-Path $script:FMODDir "include"
+        $fmodLib = Join-Path $script:FMODDir "lib"
+        if ((Test-Path $fmodInclude) -and (Test-Path $fmodLib)) {
+            $cmakeArgs += "-DFMOD_INCLUDE_DIR=$fmodInclude"
+            $cmakeArgs += "-DFMOD_LIBRARY=$fmodLib"
+            Write-Host "Added FMOD paths: $fmodInclude, $fmodLib"
+        }
+    }
     
     $cmakeArgs += $script:ZandronumSrc
     
