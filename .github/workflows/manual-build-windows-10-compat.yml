@@ -37,6 +37,7 @@ jobs:
           echo Validating that no Python is available in PATH...
           where python >nul 2>&1 && echo ERROR: Python found && exit /b 1
           echo SUCCESS: No Python found in PATH - portable install will be used
+          exit /b 0
 
       - name: Run Zandronum build script
         shell: cmd
