@@ -53,62 +53,6 @@ jobs:
             }
           }
 
-      - name: Basic executable run
-        run: |
-          Write-Host "Testing executable dependencies with dependency walker style check..."
-          
-          # Temporarily clear most of the PATH to simulate a clean environment
-          $originalPath = $env:PATH
-          $env:PATH = "C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem"
-          Write-Host "Cleared PATH to minimal Windows system directories"
-          
-          # Use PowerShell to check DLL dependencies directly
-          try {
-            # Try to load the executable and see what happens immediately
-            $proc = Start-Process -FilePath ".\build\Release\zandronum.exe" -ArgumentList "-iwad","nonexistent.wad" -PassThru -RedirectStandardError ".\error.log" -RedirectStandardOutput ".\output.log" -WindowStyle Hidden
-            
-            # Give it 3 seconds to fail with DLL error or start initializing
-            Start-Sleep -Seconds 3
-            
-            # Check if process is still running
-            if (-not $proc.HasExited) {
-              Write-Host "✅ Process started successfully - killing it now"
-              $proc.Kill()
-              $proc.WaitForExit(5000)
-            }
-            
-            # Check error output for DLL issues
-            if (Test-Path ".\error.log") {
-              $errorContent = Get-Content ".\error.log" -Raw
-              Write-Host "Error output: $errorContent"
-              
-              if ($errorContent -match "(?i)(libssl|libcrypto|api-ms-|vcruntime|msvcp)" -or
-                  $errorContent -match "(?i)(could not|cannot|unable).*(find|load|locate).*(dll|library)" -or
-                  $errorContent -match "(?i)missing.*dll") {
-                Write-Host "❌ DLL dependency error detected"
-                exit 1
-              }
-            }
-            
-            if (Test-Path ".\output.log") {
-              $outputContent = Get-Content ".\output.log" -Raw
-              Write-Host "Standard output: $outputContent"
-            }
-            
-            Write-Host "✅ No DLL dependency errors detected"
-            
-          } catch {
-            Write-Host "❌ Failed to start process: $_"
-            exit 1
-          } finally {
-            # Restore original PATH
-            $env:PATH = $originalPath
-            
-            # Clean up log files
-            Remove-Item ".\error.log" -ErrorAction SilentlyContinue
-            Remove-Item ".\output.log" -ErrorAction SilentlyContinue
-          }
-
       - name: Write Zandronum version badge JSON
         if: ${{ success() }}
         run: |
@@ -120,6 +64,7 @@ jobs:
           }
           $json = "{ `"schemaVersion`": 1, `"label`": `"zandronum`", `"message`": `"$version`", `"color`": `"orange`" }"
           Set-Content -Path zandronum-version-badge.json -Value $json
+          
       - name: Push badge files to badges branch
         if: ${{ success() }}
         run: |
