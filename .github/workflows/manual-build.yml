@@ -35,7 +35,11 @@ jobs:
           Set-Content -Path zandronum-version-badge.json -Value $json
       - name: Debug GH_PAT
         run: |
-          echo "GH_PAT is set: ${GH_PAT:+yes}"
+          if ($env:GH_PAT) { 
+            Write-Host "✅ GH_PAT is set ($($env:GH_PAT.Length) chars)" 
+          } else { 
+            Write-Host "❌ GH_PAT is not set" 
+          }
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
       - name: Push badge files to badges branch
@@ -49,5 +53,5 @@ jobs:
           git checkout -B badges
           git add build-date-badge.json zandronum-version-badge.json
           git commit -m "Update badges" || exit 0
-          git remote set-url origin https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}
+          git remote set-url origin https://x-access-token:$env:GH_PAT@github.com/${{ github.repository }}
           git push origin badges --force
