@@ -1202,7 +1202,8 @@ function Invoke-CMakeGenerate {
             $cmakeArgs += "-DOPENSSL_ROOT_DIR=$opensslDir"
             $cmakeArgs += "-DOPENSSL_INCLUDE_DIR=$opensslInclude"
             $cmakeArgs += "-DOPENSSL_LIBRARIES_DIR=$opensslLib"
-            Write-Host "Added OpenSSL paths to CMake"
+            $cmakeArgs += "-DOPENSSL_USE_STATIC_LIBS=ON"
+            Write-Host "Added OpenSSL paths to CMake (forcing static linking)"
         }
     }
     

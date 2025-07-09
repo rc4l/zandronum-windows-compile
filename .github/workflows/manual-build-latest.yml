@@ -24,6 +24,20 @@ jobs:
         run: |
           ./build.ps1
 
+      - name: Validate executable runs (no missing DLLs)
+        run: |
+          Write-Host "Testing executable can run without DLL errors..."
+          # Test with -iwad parameter pointing to nonexistent file - should fail gracefully, not with DLL error
+          $output = .\build\Release\zandronum.exe -iwad nonexistent.wad 2>&1 | Out-String
+          Write-Host "Zandronum output: $output"
+          # If it's a DLL error, it will contain "dll" or "library" 
+          if ($output -match "(?i)(dll|library|api-ms-|vcruntime|msvcp)" -and $output -notmatch "(?i)(iwad|wad)") {
+            Write-Host "❌ DLL dependency error detected"
+            exit 1
+          } else {
+            Write-Host "✅ No DLL errors - executable can start properly"
+          }
+
       - name: Write Zandronum version badge JSON
         if: ${{ success() }}
         run: |
