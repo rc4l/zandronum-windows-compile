@@ -35,15 +35,6 @@ jobs:
           }
           $json = "{ `"schemaVersion`": 1, `"label`": `"zandronum`", `"message`": `"$version`", `"color`": `"orange`" }"
           Set-Content -Path zandronum-version-badge.json -Value $json
-      - name: Debug GH_PAT
-        run: |
-          if ($env:GH_PAT) { 
-            Write-Host "✅ GH_PAT is set ($($env:GH_PAT.Length) chars)" 
-          } else { 
-            Write-Host "❌ GH_PAT is not set" 
-          }
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
       - name: Push badge files to badges branch
         if: ${{ success() }}
         run: |
