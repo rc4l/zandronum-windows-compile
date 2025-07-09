@@ -1,6 +1,6 @@
 # Zandronum EZ Windows Compilation
 
-![Build Status](https://img.shields.io/github/actions/workflow/status/rc4l/zandronum-windows-compile/manual-build.yml?label=build%20status)
+![Build Status](https://img.shields.io/github/actions/workflow/status/rc4l/zandronum-windows-compile/manual-build-latest.yml?label=build%20status)
 ![Last Build Date](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/rc4l/zandronum-windows-compile/badges/build-date-badge.json)
 ![Zandronum Version](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/rc4l/zandronum-windows-compile/badges/zandronum-version-badge.json)
 
