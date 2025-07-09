@@ -29,13 +29,14 @@ jobs:
           $json = "{ `"schemaVersion`": 1, `"label`": `"zandronum`", `"message`": `"$version`", `"color`": `"orange`" }"
           Set-Content -Path zandronum-version-badge.json -Value $json
 
-      - name: Push badge files to badges branch
+      - name: Write Zandronum version badge JSON
         if: ${{ success() }}
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin badges || true
-          git checkout -B badges
-          git add build-date-badge.json zandronum-version-badge.json
-          git commit -m "Update badges" || exit 0
-          git push origin badges --force
+          $tagLine = Get-Content src/zandronum/.hgtags | Where-Object { $_.Trim() -ne "" } | Select-Object -Last 1
+          if ($tagLine) {
+            $version = $tagLine -split " " | Select-Object -Last 1
+          } else {
+            $version = "unknown"
+          }
+          $json = "{ `"schemaVersion`": 1, `"label`": `"zandronum`", `"message`": `"$version`", `"color`": `"orange`" }"
+          Set-Content -Path zandronum-version-badge.json -Value $json
