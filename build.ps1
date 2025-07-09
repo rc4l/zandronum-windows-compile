@@ -215,14 +215,14 @@ function Expand-Archive7Zip {
     
     # Use our portable 7-Zip
     if ($script:SevenZipExe -and (Test-Path $script:SevenZipExe)) {
-        & $script:SevenZipExe x $ArchivePath "-o$DestinationPath" -y
+        & $script:SevenZipExe x $ArchivePath "-o$DestinationPath" -y | Out-Host
         if ($LASTEXITCODE -eq 0) { return }
     }
     
     # Fallback to system 7-Zip if available
     $sevenZip = Get-Command "7z.exe" -ErrorAction SilentlyContinue
     if ($sevenZip) {
-        & $sevenZip.Source x $ArchivePath "-o$DestinationPath" -y
+        & $sevenZip.Source x $ArchivePath "-o$DestinationPath" -y | Out-Host
         if ($LASTEXITCODE -eq 0) { return }
     }
     
@@ -1085,6 +1085,59 @@ function Initialize-Dependencies {
     if ($SkipDeps) {
         Write-Status "Skipping dependency setup (SkipDeps specified)"
         Write-Status "Source code download completed!"
+        
+        # Initialize script variables to prevent null reference errors
+        # Try to find existing dependencies if they exist
+        $cmakeDir = Join-Path $DepsDir "cmake"
+        $script:CMakeExe = if (Test-Path (Join-Path $cmakeDir "bin\cmake.exe")) { 
+            Join-Path $cmakeDir "bin\cmake.exe" 
+        } else { 
+            $null 
+        }
+        
+        $nasmDir = Join-Path $DepsDir "nasm"  
+        $script:NASMExe = if (Test-Path (Join-Path $nasmDir "nasm.exe")) { 
+            Join-Path $nasmDir "nasm.exe" 
+        } else { 
+            $null 
+        }
+        
+        $pythonDir = Join-Path $DepsDir "python"
+        $script:PythonExe = if (Test-Path (Join-Path $pythonDir "python.exe")) { 
+            Join-Path $pythonDir "python.exe" 
+        } else { 
+            $null 
+        }
+        
+        $fmodDir = Join-Path $DepsDir "fmod"
+        $script:FMODDir = if (Test-Path $fmodDir) { 
+            $fmodDir 
+        } else { 
+            $null 
+        }
+        
+        $opensslDir = Join-Path $DepsDir "openssl"
+        $script:OpenSSLDir = if (Test-Path $opensslDir) { 
+            $opensslDir 
+        } else { 
+            $null 
+        }
+        
+        $opusDir = Join-Path $DepsDir "opus"
+        $script:OpusDir = if (Test-Path $opusDir) { 
+            $opusDir 
+        } else { 
+            $null 
+        }
+        
+        Write-Host "Using existing dependencies if available:"
+        Write-Host "  CMake: $($script:CMakeExe)"
+        Write-Host "  NASM: $($script:NASMExe)"
+        Write-Host "  Python: $($script:PythonExe)"
+        Write-Host "  FMOD: $($script:FMODDir)"
+        Write-Host "  OpenSSL: $($script:OpenSSLDir)"
+        Write-Host "  Opus: $($script:OpusDir)"
+        
     } else {
         Write-Status "Setting up dependencies..."
         
@@ -1199,6 +1252,14 @@ function Invoke-CMakeGenerate {
 function Invoke-Build {
     Write-Status "Building Zandronum..."
     
+    # Validate required variables
+    if ([string]::IsNullOrWhiteSpace($BuildDir)) {
+        throw "BuildDir is not set or empty"
+    }
+    if ([string]::IsNullOrWhiteSpace($Configuration)) {
+        throw "Configuration is not set or empty"
+    }
+    
     # Use CMake to build
     $buildArgs = @(
         "--build", $BuildDir,
@@ -1217,7 +1278,11 @@ function Invoke-Build {
     # Copy FMOD DLLs to output directory
     $outputDir = Join-Path $BuildDir $Configuration
     
-    if ($script:FMODDir -and (Test-Path $script:FMODDir)) {
+    # Debug output for FMOD directory
+    Write-Host "Debug: script:FMODDir = '$($script:FMODDir)'"
+    Write-Host "Debug: FMODDir exists = $(if ($script:FMODDir) { Test-Path $script:FMODDir } else { 'null/empty' })"
+    
+    if (![string]::IsNullOrWhiteSpace($script:FMODDir) -and (Test-Path $script:FMODDir)) {
         $fmodBinDir = Join-Path $script:FMODDir "bin"
         
         if ((Test-Path $fmodBinDir) -and (Test-Path $outputDir)) {
@@ -1240,35 +1305,40 @@ function Invoke-Build {
         }
     } else {
         Write-Warning "FMOD directory not set or not found. FMOD DLLs not copied."
+        Write-Host "Debug: FMOD directory value: '$($script:FMODDir)'"
     }
     
     # Copy Freedoom WAD files to output directory if they don't exist
-    $freedoomSourceDir = Join-Path $ToolsDir "freedoom"
-    $freedoom2Source = Join-Path $freedoomSourceDir "freedoom2.wad"
-    $freedoom1Source = Join-Path $freedoomSourceDir "freedoom1.wad"
-    
-    if (Test-Path $outputDir) {
-        $freedoom2Dest = Join-Path $outputDir "freedoom2.wad"
-        $freedoom1Dest = Join-Path $outputDir "freedoom1.wad"
+    if ([string]::IsNullOrWhiteSpace($ToolsDir)) {
+        Write-Warning "ToolsDir is not set. Skipping Freedoom WAD copy."
+    } else {
+        $freedoomSourceDir = Join-Path $ToolsDir "freedoom"
+        $freedoom2Source = Join-Path $freedoomSourceDir "freedoom2.wad"
+        $freedoom1Source = Join-Path $freedoomSourceDir "freedoom1.wad"
         
-        # Copy freedoom2.wad if source exists and destination doesn't
-        if ((Test-Path $freedoom2Source) -and (-not (Test-Path $freedoom2Dest))) {
-            Copy-Item $freedoom2Source $freedoom2Dest -Force
-            Write-Host "Copied freedoom2.wad to output directory"
-        } elseif (-not (Test-Path $freedoom2Source)) {
-            Write-Warning "Freedoom2.wad not found at: $freedoom2Source"
-        } elseif (Test-Path $freedoom2Dest) {
-            Write-Host "freedoom2.wad already exists in output directory"
-        }
-        
-        # Copy freedoom1.wad if source exists and destination doesn't
-        if ((Test-Path $freedoom1Source) -and (-not (Test-Path $freedoom1Dest))) {
-            Copy-Item $freedoom1Source $freedoom1Dest -Force
-            Write-Host "Copied freedoom1.wad to output directory"
-        } elseif (-not (Test-Path $freedoom1Source)) {
-            Write-Warning "Freedoom1.wad not found at: $freedoom1Source"
-        } elseif (Test-Path $freedoom1Dest) {
-            Write-Host "freedoom1.wad already exists in output directory"
+        if (Test-Path $outputDir) {
+            $freedoom2Dest = Join-Path $outputDir "freedoom2.wad"
+            $freedoom1Dest = Join-Path $outputDir "freedoom1.wad"
+            
+            # Copy freedoom2.wad if source exists and destination doesn't
+            if ((Test-Path $freedoom2Source) -and (-not (Test-Path $freedoom2Dest))) {
+                Copy-Item $freedoom2Source $freedoom2Dest -Force
+                Write-Host "Copied freedoom2.wad to output directory"
+            } elseif (-not (Test-Path $freedoom2Source)) {
+                Write-Warning "Freedoom2.wad not found at: $freedoom2Source"
+            } elseif (Test-Path $freedoom2Dest) {
+                Write-Host "freedoom2.wad already exists in output directory"
+            }
+            
+            # Copy freedoom1.wad if source exists and destination doesn't
+            if ((Test-Path $freedoom1Source) -and (-not (Test-Path $freedoom1Dest))) {
+                Copy-Item $freedoom1Source $freedoom1Dest -Force
+                Write-Host "Copied freedoom1.wad to output directory"
+            } elseif (-not (Test-Path $freedoom1Source)) {
+                Write-Warning "Freedoom1.wad not found at: $freedoom1Source"
+            } elseif (Test-Path $freedoom1Dest) {
+                Write-Host "freedoom1.wad already exists in output directory"
+            }
         }
     }
     
