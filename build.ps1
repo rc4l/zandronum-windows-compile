@@ -742,15 +742,15 @@ function Get-Opus {
     }
     
     Write-Status "Setting up Opus..."
-    $opusZip = Join-Path $DepsDir "opus.zip"
+    $opusArchive = Join-Path $DepsDir "opus-1.5.2.tar.gz"
     
     # Download Opus source
-    if (-not (Test-Path $opusZip)) {
-        Write-Host "Downloading Opus 1.4 source..."
-        Invoke-Download $Dependencies.Opus.Url $opusZip
+    if (-not (Test-Path $opusArchive)) {
+        Write-Host "Downloading Opus 1.5.2 source..."
+        Invoke-Download $Dependencies.Opus.Url $opusArchive
         Write-Host "Opus download successful!"
     } else {
-        Write-Host "Using existing Opus archive: $opusZip"
+        Write-Host "Using existing Opus archive: $opusArchive"
     }
     
     # Extract Opus using 7-Zip
@@ -763,8 +763,29 @@ function Get-Opus {
             Remove-Item $tempExtractDir -Recurse -Force
         }
         
-        # Extract the archive
-        Expand-Archive7Zip $opusZip $tempExtractDir
+        # Extract the archive (tar.gz format - requires two-step extraction)
+        Write-Host "Extracting tar.gz file using 7-Zip..."
+        
+        # First extract the .gz to get the .tar file
+        & $script:SevenZipExe x $opusArchive "-o$tempExtractDir" -y
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract .gz file"
+        }
+        
+        # Find the .tar file
+        $tarFile = Join-Path $tempExtractDir "opus-1.5.2.tar"
+        if (-not (Test-Path $tarFile)) {
+            throw "Could not find extracted .tar file at: $tarFile"
+        }
+        
+        # Now extract the .tar file
+        & $script:SevenZipExe x $tarFile "-o$tempExtractDir" -y
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract .tar file"
+        }
+        
+        # Clean up the .tar file
+        Remove-Item $tarFile -Force -ErrorAction SilentlyContinue
         
         # Find the extracted Opus directory
         $extractedOpusDir = Get-ChildItem $tempExtractDir -Directory | Where-Object { $_.Name -like "opus*" } | Select-Object -First 1
@@ -775,31 +796,53 @@ function Get-Opus {
         $opusSourceDir = $extractedOpusDir.FullName
         Write-Host "Found Opus source at: $opusSourceDir"
         
-        # Check for Visual Studio solution
-        $opusSolution = Join-Path $opusSourceDir "win32\VS2015\opus.sln"
-        if (-not (Test-Path $opusSolution)) {
-            throw "Could not find Opus Visual Studio solution at: $opusSolution"
+        # Check for CMakeLists.txt (modern Opus uses CMake)
+        $opusCMakeLists = Join-Path $opusSourceDir "CMakeLists.txt"
+        if (-not (Test-Path $opusCMakeLists)) {
+            throw "Could not find Opus CMakeLists.txt at: $opusCMakeLists"
         }
         
-        Write-Host "Building Opus with MSBuild..."
+        Write-Host "Building Opus with CMake..."
         
-        # Find MSBuild
+        # Find MSBuild (we'll need it for building the generated solution)
         $msBuildPath = Get-MSBuildPath
         if (-not $msBuildPath) {
             throw "MSBuild not found. Please ensure Visual Studio is installed."
         }
         
-        # Build Opus (Release configuration, x64 platform)
-        $buildArgs = @(
-            $opusSolution
-            "/p:Configuration=Release"
-            "/p:Platform=x64"
-            "/p:PlatformToolset=v143"
-            "/m"
+        # Create build directory for Opus
+        $opusBuildDir = Join-Path $opusSourceDir "build"
+        if (Test-Path $opusBuildDir) {
+            Remove-Item $opusBuildDir -Recurse -Force
+        }
+        New-Item -ItemType Directory -Path $opusBuildDir -Force | Out-Null
+        
+        # Generate Visual Studio solution with CMake
+        $cmakeArgs = @(
+            "-G", "Visual Studio 17 2022"
+            "-A", "x64"
+            "-T", "v143"
+            "-B", $opusBuildDir
+            "-S", $opusSourceDir
+            "-DCMAKE_BUILD_TYPE=Release"
         )
         
-        Write-Host "Running: $msBuildPath $($buildArgs -join ' ')"
-        & $msBuildPath @buildArgs
+        Write-Host "Running CMake for Opus: $($script:CMakeExe) $($cmakeArgs -join ' ')"
+        & $script:CMakeExe @cmakeArgs
+        
+        if ($LASTEXITCODE -ne 0) {
+            throw "Opus CMake generation failed with exit code $LASTEXITCODE"
+        }
+        
+        # Build Opus using CMake
+        $buildArgs = @(
+            "--build", $opusBuildDir
+            "--config", "Release"
+            "--target", "opus"
+        )
+        
+        Write-Host "Building Opus: $($script:CMakeExe) $($buildArgs -join ' ')"
+        & $script:CMakeExe @buildArgs
         
         if ($LASTEXITCODE -ne 0) {
             throw "Opus build failed with exit code $LASTEXITCODE"
@@ -807,8 +850,20 @@ function Get-Opus {
         
         Write-Host "Opus build successful!"
         
-        # Copy built library and includes to our deps structure
-        $builtLibPath = Join-Path $opusSourceDir "win32\VS2015\x64\Release\opus.lib"
+        # Find the built library
+        $builtLibPath = Join-Path $opusBuildDir "Release\opus.lib"
+        if (-not (Test-Path $builtLibPath)) {
+            # Try alternative path
+            $builtLibPath = Join-Path $opusBuildDir "opus\Release\opus.lib"
+            if (-not (Test-Path $builtLibPath)) {
+                # List what's in the build directory to help debug
+                Write-Host "Build directory contents:"
+                Get-ChildItem $opusBuildDir -Recurse -Filter "*.lib" | ForEach-Object {
+                    Write-Host "  $($_.FullName)"
+                }
+                throw "Built Opus library not found. Expected at: $builtLibPath"
+            }
+        }
         $opusIncludeSourceDir = Join-Path $opusSourceDir "include"
         
         if (-not (Test-Path $builtLibPath)) {
@@ -840,7 +895,7 @@ function Get-Opus {
         
         # Clean up temporary files
         Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item $opusZip -Force -ErrorAction SilentlyContinue
+        Remove-Item $opusArchive -Force -ErrorAction SilentlyContinue
         
         if (Test-Path $opusLibFile) {
             Write-Host "Opus ready at: $opusDir"
@@ -978,11 +1033,11 @@ function Invoke-CMakeGenerate {
     $opusDir = Join-Path $DepsDir "opus"
     if (Test-Path $opusDir) {
         $opusInclude = Join-Path $opusDir "include"
-        $opusLib = Join-Path $opusDir "lib"
+        $opusLib = Join-Path $opusDir "lib\opus.lib"
         if ((Test-Path $opusInclude) -and (Test-Path $opusLib)) {
             $cmakeArgs += "-DOPUS_INCLUDE_DIR=$opusInclude"
-            $cmakeArgs += "-DOPUS_LIBRARY_DIR=$opusLib"
-            Write-Host "Added Opus paths to CMake"
+            $cmakeArgs += "-DOPUS_LIBRARIES=$opusLib"
+            Write-Host "Added Opus paths to CMake - Include: $opusInclude, Library: $opusLib"
         }
     }
     
