@@ -1,0 +1,56 @@
+name: Build Windows (Windows 10 Mock)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows-10-compat:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check PowerShell Version
+        shell: cmd
+        run: |
+          "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -Command "$PSVersionTable"
+
+      - name: Remove system Python to test portable install
+        shell: cmd
+        run: |
+          echo Removing system Python to force use of portable Python...
+          where python >nul 2>&1 && (
+            echo Found system Python, attempting removal...
+            python --version
+            rem Try to uninstall via winget
+            winget uninstall Python.Python.3.12 --silent --accept-source-agreements 2>nul
+            winget uninstall Python.Python.3.11 --silent --accept-source-agreements 2>nul
+            winget uninstall Python.Python.3.10 --silent --accept-source-agreements 2>nul
+            winget uninstall Python.Python.3.9 --silent --accept-source-agreements 2>nul
+            rem Remove from PATH
+            set "PATH=%PATH:;C:\hostedtoolcache\windows\Python=%"
+            set "PATH=%PATH:C:\hostedtoolcache\windows\Python\=%"
+          ) || (
+            echo No system Python found in PATH
+          )
+
+      - name: Validate Python removal
+        shell: cmd
+        run: |
+          echo Validating that no Python is available in PATH...
+          where python >nul 2>&1 && (
+            echo ERROR: Python still found in PATH after removal attempt!
+            python --version
+            where python
+            exit /b 1
+          ) || (
+            echo SUCCESS: No Python found in PATH - portable install will be used
+          )
+
+      - name: Run Zandronum build script
+        shell: cmd
+        run: |
+          "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -ExecutionPolicy Bypass -File "build.ps1"
