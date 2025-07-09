@@ -4,9 +4,11 @@
     Self-contained Zandronum Windows build system
     
 .DESCRIPTION
-    A touchless, portable build system for Zandronum on Windows.
+    A fully automated, touchless build system for Zandronum on Windows.
     Downloads all dependencies locally, builds everything from source,
-    and requires no global installations (except VS Build Tools if not found).
+    and automatically installs Visual Studio Build Tools if not found.
+    Includes runtime dependencies like FMOD DLLs and Freedoom WADs.
+    No manual setup or terminal restarts required.
     
 .PARAMETER Platform
     Target platform: Win32 or x64 (default: Win32)
@@ -227,6 +229,72 @@ function Expand-Archive7Zip {
     throw "Failed to extract $ArchivePath"
 }
 
+function Refresh-Environment {
+    Write-Status "Refreshing environment variables..."
+    
+    # Refresh environment variables from registry
+    $envVars = @('PATH', 'PATHEXT', 'TEMP', 'TMP')
+    foreach ($var in $envVars) {
+        $machineValue = [System.Environment]::GetEnvironmentVariable($var, 'Machine')
+        $userValue = [System.Environment]::GetEnvironmentVariable($var, 'User')
+        
+        if ($var -eq 'PATH') {
+            # Combine machine and user PATH
+            $combinedPath = @($machineValue, $userValue) | Where-Object { $_ } | Join-String -Separator ';'
+            [System.Environment]::SetEnvironmentVariable($var, $combinedPath, 'Process')
+            $env:PATH = $combinedPath
+        } elseif ($machineValue) {
+            [System.Environment]::SetEnvironmentVariable($var, $machineValue, 'Process')
+        } elseif ($userValue) {
+            [System.Environment]::SetEnvironmentVariable($var, $userValue, 'Process')
+        }
+    }
+    
+    Write-Host "Environment variables refreshed."
+}
+
+function Install-VisualStudioBuildTools {
+    Write-Status "Installing Visual Studio Build Tools via Winget..."
+    
+    # Check if winget is available
+    if (-not (Test-CommandExists "winget")) {
+        Write-Warning "Winget is not available. Please install winget or manually install Visual Studio Build Tools."
+        return $false
+    }
+    
+    Write-Host "Installing Microsoft Visual Studio Build Tools 2022..."
+    
+    # Install Visual Studio Build Tools with C++ workload
+    $wingetArgs = @(
+        "install"
+        "Microsoft.VisualStudio.2022.BuildTools"
+        "--silent"
+        "--override"
+        "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows10SDK.20348"
+        "--accept-package-agreements"
+        "--accept-source-agreements"
+    )
+    
+    Write-Host "Running: winget $($wingetArgs -join ' ')"
+    & winget @wingetArgs
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Visual Studio Build Tools installation completed successfully!"
+        
+        # Refresh environment to pick up new installations
+        Refresh-Environment
+        
+        # Give the installer a moment to complete file operations
+        Write-Host "Waiting for installation to finalize..."
+        Start-Sleep -Seconds 10
+        
+        return $true
+    } else {
+        Write-Warning "Visual Studio Build Tools installation failed with exit code $LASTEXITCODE"
+        return $false
+    }
+}
+
 function Find-VisualStudio {
     Write-Status "Looking for Visual Studio installation..."
     
@@ -253,9 +321,34 @@ function Find-VisualStudio {
         }
     }
     
-    Write-Warning "Visual Studio with v140 toolset not found. Please install Visual Studio 2022 with v140 toolset."
-    Write-Warning "You can continue, but the build may fail."
-    return $null
+    Write-Warning "Visual Studio Build Tools not found."
+    Write-Status "Automatically installing Visual Studio Build Tools 2022..."
+    
+    $installSuccess = Install-VisualStudioBuildTools
+    if ($installSuccess) {
+        Write-Host "Installation completed. Checking for Visual Studio again..."
+        
+        # Retry finding Visual Studio after installation
+        if (Test-Path $vswhere) {
+            $vsInstallations = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+            if ($vsInstallations) {
+                $vsPath = $vsInstallations[0]
+                Write-Host "Successfully found Visual Studio at: $vsPath"
+                return $vsPath
+            }
+        }
+        
+        Write-Warning "Visual Studio Build Tools were installed but cannot be detected yet."
+        Write-Host "This may require a terminal restart to take full effect."
+        Write-Host "Continuing with build attempt..."
+        return $null
+    } else {
+        Write-Warning "Automatic installation failed. Please manually install Visual Studio 2022 Build Tools."
+        Write-Host "You can install it manually with:"
+        Write-Host "  winget install Microsoft.VisualStudio.2022.BuildTools --silent --override ""--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows10SDK.20348"""
+        Write-Warning "You can continue, but the build may fail."
+        return $null
+    }
 }
 
 function Initialize-Directories {
