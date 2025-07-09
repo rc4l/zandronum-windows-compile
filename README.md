@@ -16,7 +16,7 @@ This project gives you a super easy way to build the [Zandronum source port](htt
 - **No Doom needed**: You don't need to own Doom to test or play. Freedoom (a free game data pack) is included automatically, so Zandronum will run out of the box.
 
 ## Requirements
-1. **Windows 10 and Windows 11 (x64)**: Older versions may work if they have PowerShell 5.1+ and can run the required dependencies, but are not officially tested.
+1. **Windows Windows 11 (x64)**: Older versions may work if they have PowerShell 5.1+ and can run the required dependencies, but are not officially tested.
 2. **Git**: Needed to clone Zandronum for the initial setup and future version control. Make sure your PowerShell can run git commands.
 
 ## How to Use
