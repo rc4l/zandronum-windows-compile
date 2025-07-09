@@ -40,6 +40,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Script-level variables for tool paths
+$script:CMakeExe = $null
+$script:NASMExe = $null
+$script:PythonExe = $null
+$script:FMODDir = $null
+$script:OpenSSLDir = $null
+
 # Script constants
 $ScriptRoot = $PSScriptRoot
 $DepsDir = Join-Path $ScriptRoot "deps"
@@ -75,9 +82,9 @@ $Dependencies = @{
         ExtractPath = "python"
     }
     Opus = @{
-        Version = "1.3.1"
-        Url = "https://ftp.osuosl.org/pub/xiph/releases/opus/opus-1.3.1-win32.zip"
-        ExtractPath = "opus-1.3.1"
+        Version = "1.5.2"
+        Url = "https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz"
+        ExtractPath = "opus-1.5.2"
     }
 }
 
@@ -948,11 +955,11 @@ function Invoke-CMakeGenerate {
     $fmodDir = Join-Path $DepsDir "fmod"
     if (Test-Path $fmodDir) {
         $fmodInclude = Join-Path $fmodDir "include"
-        $fmodLib = Join-Path $fmodDir "lib"
+        $fmodLib = Join-Path $fmodDir "lib\fmodex64_vc.lib"
         if ((Test-Path $fmodInclude) -and (Test-Path $fmodLib)) {
             $cmakeArgs += "-DFMOD_INCLUDE_DIR=$fmodInclude"
-            $cmakeArgs += "-DFMOD_LIBRARY_DIR=$fmodLib"
-            Write-Host "Added FMOD paths to CMake"
+            $cmakeArgs += "-DFMOD_LIBRARY=$fmodLib"
+            Write-Host "Added FMOD paths to CMake - Include: $fmodInclude, Library: $fmodLib"
         }
     }
     
@@ -990,12 +997,13 @@ function Invoke-CMakeGenerate {
     $cmakeArgs += "-DCMAKE_BUILD_TYPE=$Configuration"
     
     # Ensure CMake is available
-    if (-not $script:CMakeExe) {
+    if (-not $script:CMakeExe -or -not (Test-Path $script:CMakeExe)) {
         $cmakeDir = Join-Path $DepsDir "cmake"
         $script:CMakeExe = Join-Path $cmakeDir "bin\cmake.exe"
         if (-not (Test-Path $script:CMakeExe)) {
             throw "CMake not found. Please run without -SkipDeps first to download dependencies."
         }
+        Write-Host "Found CMake at: $script:CMakeExe"
     }
     
     Write-Host "Running CMake with arguments:"
