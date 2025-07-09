@@ -1,5 +1,9 @@
 # Zandronum EZ Windows Compilation
 
+![Build Status](https://img.shields.io/github/actions/workflow/status/rc4l/zandronum-windows-compile/manual-build.yml?label=build%20status)
+![Last Build Date](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/rc4l/zandronum-windows-compile/badges/build-date-badge.json)
+![Zandronum Version](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/rc4l/zandronum-windows-compile/badges/zandronum-version-badge.json)
+
 ## Overview
 This project gives you a super easy way to build the [Zandronum source port](https://www.youtube.com/watch?v=cR5GJCW8S9Q) on Windows. You don't need to install anything by hand or mess with complicated setup. Just download this, run one script, and everything you need gets downloaded and built for you. If you want to play with the code or make your own version, it's all ready—no headaches, no weird steps. Just clone, run, and go!
 
