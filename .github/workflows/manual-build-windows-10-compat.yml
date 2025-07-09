@@ -21,21 +21,23 @@ jobs:
       - name: Remove system Python to test portable install
         shell: cmd
         run: |
-          echo Removing system Python to force use of portable Python...
-          where python >nul 2>&1 && (
-            echo Found system Python, attempting removal...
-            python --version
-            rem Try to uninstall via winget
-            winget uninstall Python.Python.3.12 --silent --accept-source-agreements 2>nul
-            winget uninstall Python.Python.3.11 --silent --accept-source-agreements 2>nul
-            winget uninstall Python.Python.3.10 --silent --accept-source-agreements 2>nul
-            winget uninstall Python.Python.3.9 --silent --accept-source-agreements 2>nul
-            rem Remove from PATH
-            set "PATH=%PATH:;C:\hostedtoolcache\windows\Python=%"
-            set "PATH=%PATH:C:\hostedtoolcache\windows\Python\=%"
-          ) || (
-            echo No system Python found in PATH
-          )
+          "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -Command "
+            Write-Host 'Removing Python from PATH environment...'
+            $currentPath = $env:PATH
+            Write-Host 'Current PATH contains Python at:'
+            $currentPath -split ';' | Where-Object { $_ -like '*Python*' }
+            
+            # Remove all Python paths
+            $newPath = ($currentPath -split ';' | Where-Object { $_ -notlike '*Python*' -and $_ -notlike '*hostedtoolcache*' }) -join ';'
+            
+            # Set for current process
+            $env:PATH = $newPath
+            
+            # Set for GitHub Actions environment
+            Write-Host 'PATH=' + $newPath | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            
+            Write-Host 'Python paths removed from environment'
+          "
 
       - name: Validate Python removal
         shell: cmd
