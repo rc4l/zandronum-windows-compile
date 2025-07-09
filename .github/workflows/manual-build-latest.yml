@@ -1,11 +1,11 @@
-name: Manual Windows Build
+name: Build Windows (Latest)
 
 on:
   workflow_dispatch: # Allows you to trigger the workflow manually from the Actions tab
 
 jobs:
   build:
-    runs-on: windows-2019
+    runs-on: windows-latest
     permissions:
       contents: write
     steps:

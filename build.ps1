@@ -240,7 +240,7 @@ function Refresh-Environment {
         
         if ($var -eq 'PATH') {
             # Combine machine and user PATH
-            $combinedPath = @($machineValue, $userValue) | Where-Object { $_ } | Join-String -Separator ';'
+            $combinedPath = (@($machineValue, $userValue) | Where-Object { $_ }) -join ';'
             [System.Environment]::SetEnvironmentVariable($var, $combinedPath, 'Process')
             $env:PATH = $combinedPath
         } elseif ($machineValue) {
