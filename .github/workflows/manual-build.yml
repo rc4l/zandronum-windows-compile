@@ -53,5 +53,7 @@ jobs:
           git checkout -B badges
           git add build-date-badge.json zandronum-version-badge.json
           git commit -m "Update badges" || exit 0
-          git remote set-url origin https://x-access-token:$env:GH_PAT@github.com/${{ github.repository }}
+          Write-Host "Setting remote URL with token..."
+          git remote set-url origin "https://x-access-token:$env:GH_PAT@github.com/${{ github.repository }}"
+          Write-Host "Pushing to badges branch..."
           git push origin badges --force
