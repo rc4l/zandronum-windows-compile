@@ -49,11 +49,6 @@ $ToolsDir = Join-Path $ScriptRoot "tools"
 
 # Dependency versions and URLs
 $Dependencies = @{
-    SevenZip = @{
-        Version = "25.00"
-        Url = "https://www.7-zip.org/a/7z2500-x64.zip"
-        ExtractPath = "7zip"
-    }
     CMake = @{
         Version = "3.28.1"
         Url = "https://github.com/Kitware/CMake/releases/download/v3.28.1/cmake-3.28.1-windows-x86_64.zip"
@@ -199,38 +194,30 @@ function Expand-Archive7Zip {
         New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
     }
     
-    # Use our portable 7-Zip first (supports more formats than built-in)
-    if ($script:SevenZipExe -and (Test-Path $script:SevenZipExe)) {
-        Write-Host "Using 7zr.exe to extract: $ArchivePath"
-        & $script:SevenZipExe x $ArchivePath "-o$DestinationPath" -y
-        if ($LASTEXITCODE -eq 0) { 
-            Write-Host "7zr.exe extraction successful"
-            return 
-        } else {
-            Write-Warning "7zr.exe extraction failed with exit code: $LASTEXITCODE"
-        }
-    }
-    
-    # Try using built-in Expand-Archive for simple ZIP files as fallback
+    # Try using built-in Expand-Archive first for simple ZIP files
     if ($ArchivePath -like "*.zip") {
         try {
-            Write-Host "Trying built-in Expand-Archive as fallback"
             Expand-Archive -Path $ArchivePath -DestinationPath $DestinationPath -Force
             return
         } catch {
-            Write-Warning "Built-in Expand-Archive failed: $_"
+            Write-Warning "Built-in Expand-Archive failed, trying 7-Zip"
         }
+    }
+    
+    # Use our portable 7-Zip
+    if ($script:SevenZipExe -and (Test-Path $script:SevenZipExe)) {
+        & $script:SevenZipExe x $ArchivePath "-o$DestinationPath" -y
+        if ($LASTEXITCODE -eq 0) { return }
     }
     
     # Fallback to system 7-Zip if available
     $sevenZip = Get-Command "7z.exe" -ErrorAction SilentlyContinue
     if ($sevenZip) {
-        Write-Host "Trying system 7z.exe as last resort"
         & $sevenZip.Source x $ArchivePath "-o$DestinationPath" -y
         if ($LASTEXITCODE -eq 0) { return }
     }
     
-    throw "Failed to extract $ArchivePath - all extraction methods failed"
+    throw "Failed to extract $ArchivePath"
 }
 
 function Find-VisualStudio {
@@ -276,34 +263,22 @@ function Initialize-Directories {
 }
 
 function Get-SevenZip {
-    $sevenZipDir = Join-Path $DepsDir "7zip"
-    $sevenZipExe = Join-Path $sevenZipDir "7z.exe"
+    # Use committed 7z.exe instead of downloading
+    $sevenZipExe = Join-Path $ScriptRoot "tools\7z\7z.exe"
     
     if (Test-Path $sevenZipExe) {
-        Write-Host "7-Zip already exists at: $sevenZipExe"
-        return $sevenZipExe
-    }
-    
-    Write-Status "Setting up 7-Zip (full version for NSIS support)..."
-    
-    # Create directory for 7-Zip
-    if (-not (Test-Path $sevenZipDir)) {
-        New-Item -ItemType Directory -Path $sevenZipDir -Force | Out-Null
-    }
-    
-    # Download full 7-Zip for NSIS support
-    $sevenZipZip = Join-Path $DepsDir "7zip.zip"
-    $sevenZipUrl = "https://www.7-zip.org/a/7z2500-x64.zip"
-    
-    Invoke-Download $sevenZipUrl $sevenZipZip
-    Expand-Archive -Path $sevenZipZip -DestinationPath $sevenZipDir -Force
-    Remove-Item $sevenZipZip -Force -ErrorAction SilentlyContinue
-    
-    if (Test-Path $sevenZipExe) {
-        Write-Host "7-Zip ready at: $sevenZipExe"
-        return $sevenZipExe
+        Write-Host "Using committed 7z.exe at: $sevenZipExe"
+        # Test that it works
+        try {
+            & $sevenZipExe | Select-Object -First 2 | Out-Null
+            Write-Host "7z.exe is working and ready for NSIS extraction!"
+            return $sevenZipExe
+        } catch {
+            Write-Warning "7z.exe test failed: $_"
+            throw "Committed 7z.exe is not working"
+        }
     } else {
-        throw "Failed to setup 7-Zip"
+        throw "7z.exe not found at $sevenZipExe - please ensure 7z.exe is committed to the tools/7z/ directory"
     }
 }
 

@@ -7,8 +7,3 @@ context/
 # Temporary files
 *.tmp
 *.log
-
-# Archives
-*.tar.gz
-*.zip
-*.exe
