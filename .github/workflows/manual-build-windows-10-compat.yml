@@ -35,13 +35,7 @@ jobs:
         shell: cmd
         run: |
           echo Validating that no Python is available in PATH...
-          where python >nul 2>&1
-          if %ERRORLEVEL% equ 0 (
-            echo ERROR: Python still found in PATH after removal attempt!
-            python --version
-            where python
-            exit /b 1
-          )
+          where python >nul 2>&1 && echo ERROR: Python found && exit /b 1
           echo SUCCESS: No Python found in PATH - portable install will be used
 
       - name: Run Zandronum build script
