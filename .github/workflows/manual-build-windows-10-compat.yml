@@ -41,9 +41,8 @@ jobs:
             python --version
             where python
             exit /b 1
-          ) else (
-            echo SUCCESS: No Python found in PATH - portable install will be used
           )
+          echo SUCCESS: No Python found in PATH - portable install will be used
 
       - name: Run Zandronum build script
         shell: cmd
