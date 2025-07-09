@@ -36,7 +36,8 @@ param(
     [string]$Configuration = "Release",
     
     [switch]$Clean,
-    [switch]$SkipDeps
+    [switch]$SkipDeps,
+    [switch]$TestDynamicLinking  # For testing CI DLL detection - uses dynamic OpenSSL linking
 )
 
 Set-StrictMode -Version Latest
@@ -1202,7 +1203,13 @@ function Invoke-CMakeGenerate {
             $cmakeArgs += "-DOPENSSL_ROOT_DIR=$opensslDir"
             $cmakeArgs += "-DOPENSSL_INCLUDE_DIR=$opensslInclude"
             $cmakeArgs += "-DOPENSSL_LIBRARIES_DIR=$opensslLib"
-            # $cmakeArgs += "-DOPENSSL_USE_STATIC_LIBS=ON"  # TEMPORARILY DISABLED FOR TESTING
+            # Force static OpenSSL linking (unless testing dynamic linking)
+            if (-not $TestDynamicLinking) {
+                $cmakeArgs += "-DOPENSSL_USE_STATIC_LIBS=ON"
+                Write-Host "Using static OpenSSL linking"
+            } else {
+                Write-Host "WARNING: Using dynamic OpenSSL linking for testing purposes"
+            }
             Write-Host "Added OpenSSL paths to CMake (using dynamic linking for testing)"
         }
     }

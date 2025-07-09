@@ -2,6 +2,12 @@ name: Build Windows (Latest)
 
 on:
   workflow_dispatch: # Allows you to trigger the workflow manually from the Actions tab
+    inputs:
+      test_dynamic_linking:
+        description: 'Test dynamic linking (for CI validation - should fail DLL check)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
@@ -22,54 +28,207 @@ jobs:
       - name: Run Zandronum build script
         shell: pwsh
         run: |
-          ./build.ps1
+          if ("${{ github.event.inputs.test_dynamic_linking }}" -eq "true") {
+            Write-Host "⚠️  TESTING MODE: Building with dynamic linking (should fail DLL check)"
+            ./build.ps1 -TestDynamicLinking
+          } else {
+            ./build.ps1
+          }
 
-      - name: Basic executable run
+      - name: System diagnostics (check for OpenSSL libraries)
         run: |
-          Write-Host "Testing executable dependencies with dependency walker style check..."
+          Write-Host "=== System Diagnostics ==="
+          Write-Host "Current PATH:"
+          $env:PATH -split ";" | ForEach-Object { Write-Host "  $_" }
           
-          # Use PowerShell to check DLL dependencies directly
-          try {
-            # Try to load the executable and see what happens immediately
-            $proc = Start-Process -FilePath ".\build\Release\zandronum.exe" -ArgumentList "-iwad","nonexistent.wad" -PassThru -RedirectStandardError ".\error.log" -RedirectStandardOutput ".\output.log" -WindowStyle Hidden
+          Write-Host "`nSearching for OpenSSL libraries in system:"
+          Get-ChildItem -Path "C:\Program Files" -Recurse -Include "*ssl*.dll", "*crypto*.dll" -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
+          Get-ChildItem -Path "C:\Windows\System32" -Include "*ssl*.dll", "*crypto*.dll" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
+          
+          Write-Host "`nTesting direct DLL dependencies with dumpbin (if available):"
+          $zandronumPath = ".\build\Release\zandronum.exe"
+          if (Test-Path $zandronumPath) {
+            Write-Host "Executable: $zandronumPath"
             
-            # Give it 3 seconds to fail with DLL error or start initializing
-            Start-Sleep -Seconds 3
-            
-            # Check if process is still running
-            if (-not $proc.HasExited) {
-              Write-Host "✅ Process started successfully - killing it now"
-              $proc.Kill()
-              $proc.WaitForExit(5000)
+            # Try to use dumpbin to check dependencies
+            try {
+              $dumpbinPath = Get-ChildItem -Path "C:\Program Files*" -Recurse -Include "dumpbin.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($dumpbinPath) {
+                Write-Host "Using dumpbin: $($dumpbinPath.FullName)"
+                & $dumpbinPath.FullName /dependents $zandronumPath | Select-String -Pattern "ssl|crypto" -CaseSensitive
+              } else {
+                Write-Host "dumpbin not found"
+              }
+            } catch {
+              Write-Host "dumpbin failed: $_"
             }
+          }
+
+      - name: DLL dependency verification
+        run: |
+          Write-Host "=== DLL Dependency Verification ==="
+          $zandronumPath = ".\build\Release\zandronum.exe"
+          $testingDynamic = "${{ github.event.inputs.test_dynamic_linking }}" -eq "true"
+          
+          if ($testingDynamic) {
+            Write-Host "⚠️  TESTING MODE: Expecting this build to have DLL dependencies"
+          }
+          
+          # Method 1: Use dumpbin to check dependencies
+          Write-Host "`n--- Method 1: Static dependency analysis ---"
+          try {
+            $vsPath = Get-ChildItem "C:\Program Files*" -Filter "Microsoft Visual Studio" -Directory | Select-Object -First 1
+            if ($vsPath) {
+              $dumpbinPath = Get-ChildItem $vsPath.FullName -Recurse -Filter "dumpbin.exe" | Select-Object -First 1
+              if ($dumpbinPath) {
+                Write-Host "Using dumpbin to check dependencies..."
+                $dependencies = & $dumpbinPath.FullName /dependents $zandronumPath 2>&1
+                $dependencies | Write-Host
+                
+                # Check for dynamic OpenSSL dependencies
+                $sslDeps = $dependencies | Select-String -Pattern "(libssl|libcrypto|ssl|crypto).*\.dll" -CaseSensitive
+                if ($sslDeps) {
+                  if ($testingDynamic) {
+                    Write-Host "✅ Found dynamic SSL dependencies (expected in test mode):"
+                    $sslDeps | Write-Host
+                  } else {
+                    Write-Host "❌ Found dynamic SSL dependencies (should be static):"
+                    $sslDeps | Write-Host
+                    exit 1
+                  }
+                } else {
+                  if ($testingDynamic) {
+                    Write-Host "❌ No dynamic SSL dependencies found (expected in test mode)"
+                    exit 1
+                  } else {
+                    Write-Host "✅ No dynamic SSL dependencies found"
+                  }
+                }
+              }
+            }
+          } catch {
+            Write-Host "dumpbin check failed: $_"
+          }
+          
+          # Method 2: Use PowerShell's own assembly loading to check for missing dependencies
+          Write-Host "`n--- Method 2: Isolated environment test ---"
+          
+          # Create a minimal isolated environment script
+          $testScript = @'
+          try {
+            # Try to load the PE file and check if all imports can be resolved
+            Add-Type -TypeDefinition @"
+              using System;
+              using System.Runtime.InteropServices;
+              public class NativeMethods {
+                [DllImport("kernel32.dll", SetLastError = true)]
+                public static extern IntPtr LoadLibrary(string lpFileName);
+                
+                [DllImport("kernel32.dll", SetLastError = true)]
+                public static extern bool FreeLibrary(IntPtr hModule);
+                
+                [DllImport("kernel32.dll")]
+                public static extern uint GetLastError();
+              }
+"@
             
-            # Check error output for DLL issues
-            if (Test-Path ".\error.log") {
-              $errorContent = Get-Content ".\error.log" -Raw
-              Write-Host "Error output: $errorContent"
-              
-              if ($errorContent -match "(?i)(libssl|libcrypto|api-ms-|vcruntime|msvcp)" -or
-                  $errorContent -match "(?i)(could not|cannot|unable).*(find|load|locate).*(dll|library)" -or
-                  $errorContent -match "(?i)missing.*dll") {
-                Write-Host "❌ DLL dependency error detected"
+            $handle = [NativeMethods]::LoadLibrary($args[0])
+            $error = [NativeMethods]::GetLastError()
+            
+            if ($handle -eq [IntPtr]::Zero) {
+              Write-Host "LoadLibrary failed with error: $error"
+              # Common Windows error codes:
+              # 126 = The specified module could not be found
+              # 127 = The specified procedure could not be found  
+              # 193 = not a valid Win32 application
+              if ($error -eq 126) {
+                Write-Host "ERROR: Missing DLL dependency detected (Error 126)"
                 exit 1
+              } elseif ($error -eq 127) {
+                Write-Host "ERROR: Missing procedure in DLL (Error 127)"
+                exit 1
+              } else {
+                Write-Host "ERROR: LoadLibrary failed with error code $error"
+                exit 1
+              }
+            } else {
+              Write-Host "✅ LoadLibrary succeeded - all dependencies available"
+              [NativeMethods]::FreeLibrary($handle) | Out-Null
+            }
+          } catch {
+            Write-Host "ERROR: Exception during dependency check: $_"
+            exit 1
+          }
+'@
+          
+          # Clear PATH to simulate clean environment
+          $originalPath = $env:PATH
+          try {
+            $env:PATH = "C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem"
+            
+            # Run the test in a new PowerShell process with the minimal environment
+            $result = powershell.exe -Command "& { $testScript }" -ArgumentList $zandronumPath
+            Write-Host $result
+            
+            if ($LASTEXITCODE -ne 0) {
+              if ($testingDynamic) {
+                Write-Host "✅ Dependency test failed as expected in test mode"
+              } else {
+                Write-Host "❌ Dependency test failed with exit code: $LASTEXITCODE"
+                exit 1
+              }
+            } else {
+              if ($testingDynamic) {
+                Write-Host "❌ Dependency test passed unexpectedly in test mode (system DLLs may be available)"
+              } else {
+                Write-Host "✅ LoadLibrary test passed"
               }
             }
             
-            if (Test-Path ".\output.log") {
-              $outputContent = Get-Content ".\output.log" -Raw
-              Write-Host "Standard output: $outputContent"
+          } finally {
+            $env:PATH = $originalPath
+          }
+          
+          # Method 3: Try to actually run the executable with minimal error handling
+          Write-Host "`n--- Method 3: Runtime execution test ---"
+          $runtimeTestPassed = $true
+          try {
+            $env:PATH = "C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem"
+            
+            # Use timeout command to limit execution time and capture any immediate startup errors
+            $output = cmd.exe /c "timeout /t 2 /nobreak >nul & echo Starting executable... & .\build\Release\zandronum.exe -iwad nonexistent.wad 2>&1"
+            Write-Host "Execution output:"
+            Write-Host $output
+            
+            # Check for common DLL error patterns in Windows
+            if ($output -match "(?i)(is missing|not found|could not be located|entry point.*could not be located)" -or
+                $output -match "(?i)(libssl|libcrypto).*dll" -or 
+                $output -match "(?i)0xc0000135") {  # STATUS_DLL_NOT_FOUND
+              if ($testingDynamic) {
+                Write-Host "✅ Runtime DLL dependency error detected (expected in test mode)"
+              } else {
+                Write-Host "❌ Runtime DLL dependency error detected"
+                exit 1
+              }
+              $runtimeTestPassed = $false
             }
             
-            Write-Host "✅ No DLL dependency errors detected"
+            if ($runtimeTestPassed) {
+              if ($testingDynamic) {
+                Write-Host "❌ No runtime DLL errors detected (unexpected in test mode - system OpenSSL may be available)"
+              } else {
+                Write-Host "✅ No runtime DLL errors detected"
+              }
+            }
             
-          } catch {
-            Write-Host "❌ Failed to start process: $_"
-            exit 1
           } finally {
-            # Clean up log files
-            Remove-Item ".\error.log" -ErrorAction SilentlyContinue
-            Remove-Item ".\output.log" -ErrorAction SilentlyContinue
+            $env:PATH = $originalPath
+          }
+          
+          if (-not $testingDynamic) {
+            Write-Host "`n✅ All DLL dependency tests passed!"
+          } else {
+            Write-Host "`n⚠️  Test mode completed - results show dynamic linking behavior"
           }
 
       - name: Write Zandronum version badge JSON
