@@ -1,0 +1,14 @@
+# Build artifacts
+deps/
+zandronum/
+build*/
+context/
+
+# Temporary files
+*.tmp
+*.log
+
+# Archives
+*.tar.gz
+*.zip
+*.exe
