@@ -12,6 +12,7 @@ This project gives you a super easy way to build the [Zandronum source port](htt
 - **No manual installs**: The script grabs and sets up all the tools and libraries you need.
 - **Works anywhere**: You can put this folder anywhere on your PC and it will still work.
 - **Fast rebuilds**: Stuff you download once is saved in `deps/` so you don't have to re-download it every time.
+- **Use your favorite IDE**: Edit code in any IDE you like—VS Code, Visual Studio, CLion, or anything else. You never have to set up build tasks or mess with project files: just keep rerunning `build.ps1` to compile your changes, no matter what editor you use. It's impossible to mess up—just edit and rerun the script!
 - **No Doom needed**: You don't need to own Doom to test or play. Freedoom (a free game data pack) is included automatically, so Zandronum will run out of the box.
 
 ## Requirements
