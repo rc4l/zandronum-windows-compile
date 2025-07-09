@@ -17,13 +17,6 @@ jobs:
           $json = "{ `"schemaVersion`": 1, `"label`": `"last build`", `"message`": `"$date UTC`", `"color`": `"blue`" }"
           Set-Content -Path build-date-badge.json -Value $json
 
-      - name: Write Zandronum version badge JSON
-        if: ${{ success() }}
-        run: |
-          $version = Get-Content src/zandronum/version.txt
-          $json = "{ `"schemaVersion`": 1, `"label`": `"zandronum`", `"message`": `"$version`", `"color`": `"orange`" }"
-          Set-Content -Path zandronum-version-badge.json -Value $json
-
       - name: Push badge files to badges branch
         if: ${{ success() }}
         run: |
@@ -39,3 +32,10 @@ jobs:
         shell: pwsh
         run: |
           ./build.ps1
+
+      - name: Write Zandronum version badge JSON
+        if: ${{ success() }}
+        run: |
+          $version = Get-Content src/zandronum/version.txt
+          $json = "{ `"schemaVersion`": 1, `"label`": `"zandronum`", `"message`": `"$version`", `"color`": `"orange`" }"
+          Set-Content -Path zandronum-version-badge.json -Value $json
