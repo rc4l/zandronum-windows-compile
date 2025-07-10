@@ -14,10 +14,21 @@ jobs:
 
       - name: Install Mercurial
         run: |
-          Write-Host "Installing Mercurial via winget..."
-          winget install Mercurial.Mercurial -e --accept-package-agreements --accept-source-agreements
+          Write-Host "Installing Mercurial via Chocolatey..."
+          # Install Chocolatey if not present
+          if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
+            Write-Host "Installing Chocolatey..."
+            Set-ExecutionPolicy Bypass -Scope Process -Force
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+            iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          }
+          
+          Write-Host "Installing Mercurial..."
+          choco install hg -y
+          
           Write-Host "Refreshing PATH to include Mercurial..."
           $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+          
           Write-Host "Verifying Mercurial installation..."
           hg version
 
