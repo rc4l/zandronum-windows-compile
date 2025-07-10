@@ -75,8 +75,13 @@ $Dependencies = @{
     }
     OpenSSL = @{
         Version = "3.5.1"
-        Url = "https://download.firedaemon.com/FireDaemon-OpenSSL/openssl-3.5.1.zip"
+        Url = "https://www.openssl.org/source/openssl-3.5.1.tar.gz"
         ExtractPath = "openssl-3.5.1"
+    }
+    StrawberryPerl = @{
+        Version = "5.38.2.2"
+        Url = "https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_53822_64bit/strawberry-perl-5.38.2.2-64bit-portable.zip"
+        ExtractPath = "strawberry-perl"
     }
     Python = @{
         Version = "3.12.1"
@@ -438,6 +443,33 @@ function Get-NASM {
     }
 }
 
+function Get-StrawberryPerl {
+    $perlDir = Join-Path $DepsDir "strawberry-perl"
+    $perlExe = Join-Path $perlDir "perl\bin\perl.exe"
+    
+    if (Test-Path $perlExe) {
+        Write-Host "Strawberry Perl already exists at: $perlDir"
+        return $perlDir
+    }
+    
+    Write-Status "Setting up Strawberry Perl Portable..."
+    $perlZip = Join-Path $DepsDir "strawberry-perl.zip"
+    
+    Invoke-Download $Dependencies.StrawberryPerl.Url $perlZip
+    
+    Write-Host "Extracting Strawberry Perl (this may take a while due to many small files)..."
+    Expand-Archive7Zip $perlZip $perlDir
+    
+    Remove-Item $perlZip -Force -ErrorAction SilentlyContinue
+    
+    if (Test-Path $perlExe) {
+        Write-Host "Strawberry Perl ready at: $perlDir"
+        return $perlDir
+    } else {
+        throw "Failed to setup Strawberry Perl"
+    }
+}
+
 function Get-Python {
     $pythonDir = Join-Path $DepsDir "python"
     $pythonExe = Join-Path $pythonDir "python.exe"
@@ -739,112 +771,193 @@ function Get-OpenSSL {
     $opensslIncludeDir = Join-Path $opensslDir "include"
     $opensslLibDir = Join-Path $opensslDir "lib"
     
-    if (Test-Path $opensslIncludeDir) {
-        Write-Host "OpenSSL already exists at: $opensslDir"
-        return $opensslDir
+    # Check for static libraries specifically
+    $libCryptoStatic = Join-Path $opensslLibDir "libcrypto.lib"
+    $libSslStatic = Join-Path $opensslLibDir "libssl.lib"
+    
+    if ((Test-Path $libCryptoStatic) -and (Test-Path $libSslStatic)) {
+        # Verify these are large static libraries, not small import libs
+        $cryptoSize = (Get-Item $libCryptoStatic).Length
+        $sslSize = (Get-Item $libSslStatic).Length
+        
+        if ($cryptoSize -gt 1MB -and $sslSize -gt 1MB) {
+            Write-Host "Static OpenSSL libraries already exist at: $opensslDir"
+            Write-Host "  libcrypto.lib: $([math]::Round($cryptoSize / 1MB, 2)) MB"
+            Write-Host "  libssl.lib: $([math]::Round($sslSize / 1MB, 2)) MB"
+            return $opensslDir
+        } else {
+            Write-Warning "Found small .lib files (import libs), rebuilding as static..."
+            Remove-Item $opensslDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
     
-    Write-Status "Setting up OpenSSL..."
-    $opensslZip = Join-Path $DepsDir "openssl-3.5.1.zip"
+    Write-Status "Building static OpenSSL from source..."
     
-    # Download OpenSSL
-    if (-not (Test-Path $opensslZip)) {
-        Write-Host "Downloading OpenSSL 3.5.1..."
-        Invoke-Download $Dependencies.OpenSSL.Url $opensslZip
-        Write-Host "OpenSSL download successful!"
+    # Ensure we have Strawberry Perl
+    $perlDir = Get-StrawberryPerl
+    $perlExe = Join-Path $perlDir "perl\bin\perl.exe"
+    
+    if (-not (Test-Path $perlExe)) {
+        throw "Perl not found at: $perlExe"
+    }
+    
+    # Download OpenSSL source
+    $opensslTarGz = Join-Path $DepsDir "openssl-3.5.1.tar.gz"
+    if (-not (Test-Path $opensslTarGz)) {
+        Write-Host "Downloading OpenSSL 3.5.1 source..."
+        Invoke-Download $Dependencies.OpenSSL.Url $opensslTarGz
+        Write-Host "OpenSSL source download successful!"
     } else {
-        Write-Host "Using existing OpenSSL archive: $opensslZip"
+        Write-Host "Using existing OpenSSL source: $opensslTarGz"
     }
     
-    # Extract OpenSSL using 7-Zip
-    Write-Host "Extracting OpenSSL using 7-Zip..."
-    $tempExtractDir = Join-Path $DepsDir "openssl_temp"
+    # Extract OpenSSL source using 7-Zip (two-step for .tar.gz)
+    Write-Host "Extracting OpenSSL source..."
+    $tempExtractDir = Join-Path $DepsDir "openssl_source_temp"
     
     try {
-        # Clean up any previous extraction attempts
+        # Clean up any previous extraction
         if (Test-Path $tempExtractDir) {
             Remove-Item $tempExtractDir -Recurse -Force
         }
         
-        # Extract the archive
-        Write-Host "Running 7-Zip extraction..."
-        Expand-Archive7Zip $opensslZip $tempExtractDir
-        
-        Write-Host "Extraction completed. Looking for OpenSSL x64 files..."
-        
-        # Create final OpenSSL directory
-        if (-not (Test-Path $opensslDir)) {
-            New-Item -ItemType Directory -Path $opensslDir -Force | Out-Null
+        # First extract the .gz to get the .tar file
+        & $script:SevenZipExe x $opensslTarGz "-o$tempExtractDir" -y
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract .gz file"
         }
         
-        # Look for the x64 directory in the extracted content (FireDaemon structure)
-        $x64Dir = Get-ChildItem $tempExtractDir -Recurse -Directory | Where-Object { $_.Name -eq "x64" } | Select-Object -First 1
+        # Find the .tar file
+        $tarFile = Join-Path $tempExtractDir "openssl-3.5.1.tar"
+        if (-not (Test-Path $tarFile)) {
+            throw "Could not find extracted .tar file at: $tarFile"
+        }
         
-        if ($x64Dir) {
-            $x64Path = $x64Dir.FullName
-            Write-Host "Found x64 directory at: $x64Path"
+        # Now extract the .tar file
+        & $script:SevenZipExe x $tarFile "-o$tempExtractDir" -y
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract .tar file"
+        }
+        
+        # Clean up the .tar file
+        Remove-Item $tarFile -Force -ErrorAction SilentlyContinue
+        
+        # Find the extracted OpenSSL directory
+        $opensslSourceDir = Join-Path $tempExtractDir "openssl-3.5.1"
+        if (-not (Test-Path $opensslSourceDir)) {
+            throw "Could not find extracted OpenSSL source directory at: $opensslSourceDir"
+        }
+        
+        Write-Host "Found OpenSSL source at: $opensslSourceDir"
+        
+        # Set up environment for building
+        $oldLocation = Get-Location
+        $oldPath = $env:PATH
+        $oldLcAll = $env:LC_ALL
+        $oldLang = $env:LANG
+        
+        try {
+            # Add Strawberry Perl and NASM to PATH
+            $perlBinDir = Join-Path $perlDir "perl\bin"
+            $nasmDir = Join-Path $DepsDir "nasm"
+            $env:PATH = "$perlBinDir;$nasmDir;$env:PATH"
             
-            # Copy include files from x64 directory
-            $srcIncludeDir = Join-Path $x64Path "include"
-            if (Test-Path $srcIncludeDir) {
-                Copy-Item $srcIncludeDir $opensslDir -Recurse -Force
-                Write-Host "Copied OpenSSL headers from: $srcIncludeDir"
+            # Suppress Perl locale warnings by using C locale
+            $env:LC_ALL = "C"
+            $env:LANG = "C"
+            
+            # Change to OpenSSL source directory
+            Set-Location $opensslSourceDir
+            
+            # Find Visual Studio installation and vcvars64.bat
+            $vcvarsPath = Get-VCVarsPath
+            if (-not $vcvarsPath) {
+                throw "vcvars64.bat not found. Please ensure Visual Studio 2022 is installed with C++ development tools."
             }
             
-            # Copy library files from x64 directory
-            $srcLibDir = Join-Path $x64Path "lib"
-            if (Test-Path $srcLibDir) {
-                Copy-Item $srcLibDir $opensslDir -Recurse -Force
-                Write-Host "Copied OpenSSL libraries from: $srcLibDir"
+            Write-Host "Configuring OpenSSL for static linking..."
+            
+            # Configure OpenSSL with no-shared to build static libraries only
+            $configureArgs = @(
+                "Configure"
+                "VC-WIN64A"
+                "no-shared"
+                "no-dynamic-engine"
+                "--prefix=$opensslDir"
+                "--openssldir=$opensslDir"
+            )
+            
+            Write-Host "Running: $perlExe $($configureArgs -join ' ')"
+            & $perlExe @configureArgs
+            
+            if ($LASTEXITCODE -ne 0) {
+                throw "OpenSSL configure failed with exit code $LASTEXITCODE"
             }
             
-            # Copy binary files from x64 directory
-            $srcBinDir = Join-Path $x64Path "bin"
-            if (Test-Path $srcBinDir) {
-                Copy-Item $srcBinDir $opensslDir -Recurse -Force
-                Write-Host "Copied OpenSSL binaries from: $srcBinDir"
+            Write-Host "Building OpenSSL (this will take several minutes)..."
+            
+            # Create a batch file to run nmake with proper environment
+            $buildBat = Join-Path $opensslSourceDir "build_openssl.bat"
+            $buildScript = @"
+@echo off
+call "$vcvarsPath"
+nmake
+if %ERRORLEVEL% neq 0 exit /b %ERRORLEVEL%
+nmake install_sw
+"@
+            Set-Content -Path $buildBat -Value $buildScript
+            
+            # Run the build
+            & cmd.exe /c $buildBat
+            
+            if ($LASTEXITCODE -ne 0) {
+                throw "OpenSSL build failed with exit code $LASTEXITCODE"
             }
-        } else {
-            # Fallback: look for include/lib directories anywhere in the structure
-            Write-Host "x64 directory not found, searching for include/lib directories..."
             
-            $includeFound = $false
-            $libFound = $false
+            Write-Host "OpenSSL build completed successfully!"
             
-            Get-ChildItem $tempExtractDir -Recurse -Directory | ForEach-Object {
-                if ($_.Name -eq "include" -and (Test-Path (Join-Path $_.FullName "openssl"))) {
-                    $srcIncludeDir = $_.FullName
-                    Copy-Item $srcIncludeDir $opensslDir -Recurse -Force
-                    Write-Host "Copied OpenSSL headers from: $srcIncludeDir"
-                    $includeFound = $true
+            # Verify the static libraries were created
+            if ((Test-Path $libCryptoStatic) -and (Test-Path $libSslStatic)) {
+                $cryptoSize = (Get-Item $libCryptoStatic).Length
+                $sslSize = (Get-Item $libSslStatic).Length
+                
+                Write-Host "Static OpenSSL libraries created:"
+                Write-Host "  libcrypto.lib: $([math]::Round($cryptoSize / 1MB, 2)) MB"
+                Write-Host "  libssl.lib: $([math]::Round($sslSize / 1MB, 2)) MB"
+                
+                if ($cryptoSize -lt 1MB -or $sslSize -lt 1MB) {
+                    throw "Generated libraries are too small - they may not be static"
                 }
-                if ($_.Name -eq "lib" -and ($_.GetFiles("*.lib").Count -gt 0)) {
-                    $srcLibDir = $_.FullName
-                    Copy-Item $srcLibDir $opensslDir -Recurse -Force
-                    Write-Host "Copied OpenSSL libraries from: $srcLibDir"
-                    $libFound = $true
-                }
+            } else {
+                throw "Static libraries not found after build"
             }
             
-            if (-not ($includeFound -and $libFound)) {
-                throw "Could not find OpenSSL include or lib directories in extracted content"
-            }
+        } finally {
+            # Restore environment
+            Set-Location $oldLocation
+            $env:PATH = $oldPath
+            $env:LC_ALL = $oldLcAll
+            $env:LANG = $oldLang
         }
         
         # Clean up temporary files
         Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
         
         if (Test-Path $opensslIncludeDir) {
-            Write-Host "OpenSSL ready at: $opensslDir"
+            Write-Host "Static OpenSSL ready at: $opensslDir"
             return $opensslDir
         } else {
-            throw "Failed to extract OpenSSL include files"
+            throw "Failed to build static OpenSSL libraries"
         }
         
     } catch {
         # Clean up on failure
         Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
-        throw "Failed to setup OpenSSL: $_"
+        Set-Location $oldLocation -ErrorAction SilentlyContinue
+        $env:PATH = $oldPath
+        $env:LC_ALL = $oldLcAll
+        $env:LANG = $oldLang
+        throw "Failed to build OpenSSL: $_"
     }
 }
 
@@ -1078,6 +1191,41 @@ function Get-MSBuildPath {
     }
 }
 
+function Get-VCVarsPath {
+    # Use vswhere.exe to find Visual Studio installation and locate vcvars64.bat
+    $vswhereExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    
+    if (-not (Test-Path $vswhereExe)) {
+        Write-Warning "vswhere.exe not found. Please ensure Visual Studio is installed."
+        return $null
+    }
+    
+    try {
+        # Find the latest VS installation with C++ component
+        $vsInstallPath = & $vswhereExe -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+        
+        if (-not $vsInstallPath) {
+            Write-Warning "No Visual Studio installation with C++ tools found."
+            return $null
+        }
+        
+        # Construct vcvars64.bat path
+        $vcvarsPath = Join-Path $vsInstallPath "VC\Auxiliary\Build\vcvars64.bat"
+        
+        if (Test-Path $vcvarsPath) {
+            Write-Host "Found vcvars64.bat at: $vcvarsPath"
+            return $vcvarsPath
+        } else {
+            Write-Warning "vcvars64.bat not found at expected location: $vcvarsPath"
+            return $null
+        }
+        
+    } catch {
+        Write-Warning "vswhere failed while looking for vcvars64.bat: $_"
+        return $null
+    }
+}
+
 function Initialize-Dependencies {
     # Always download source code regardless of SkipDeps
     Get-ZandronumSource
@@ -1150,7 +1298,7 @@ function Initialize-Dependencies {
         
         # Setup optional dependencies
         $script:FMODDir = Get-FMOD
-        $script:OpenSSLDir = Get-OpenSSL
+        $script:OpenSSLDir = Get-OpenSSL  # This will now build static libraries
         
         # Try to setup Opus, but don't fail the build if it doesn't work
         try {
