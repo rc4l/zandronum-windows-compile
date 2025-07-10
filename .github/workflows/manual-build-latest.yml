@@ -12,6 +12,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install Mercurial
+        run: |
+          Write-Host "Installing Mercurial via winget..."
+          winget install Mercurial.Mercurial -e --accept-package-agreements --accept-source-agreements
+          Write-Host "Refreshing PATH to include Mercurial..."
+          $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+          Write-Host "Verifying Mercurial installation..."
+          hg version
+
       - name: Write build date badge JSON
         if: ${{ success() }}
         run: |
@@ -27,14 +36,22 @@ jobs:
       - name: Write Zandronum version badge JSON
         if: ${{ success() }}
         run: |
-          $tagLine = Get-Content src/zandronum/.hgtags | Where-Object { $_.Trim() -ne "" } | Select-Object -Last 1
-          if ($tagLine) {
-            $version = $tagLine -split " " | Select-Object -Last 1
+          # Get current Zandronum revision info using hg
+          cd src/zandronum
+          $revision = hg identify --id
+          $branch = hg branch
+          $tags = hg log -r . --template "{tags}"
+          
+          # Use tag if available, otherwise use branch and short revision
+          if ($tags -and $tags -ne "tip") {
+            $version = $tags
           } else {
-            $version = "unknown"
+            $shortRev = $revision.Substring(0, [Math]::Min(12, $revision.Length))
+            $version = "$branch-$shortRev"
           }
+          
           $json = "{ `"schemaVersion`": 1, `"label`": `"zandronum`", `"message`": `"$version`", `"color`": `"orange`" }"
-          Set-Content -Path zandronum-version-badge.json -Value $json
+          Set-Content -Path ../../zandronum-version-badge.json -Value $json
           
       - name: Push badge files to badges branch
         if: ${{ success() }}
