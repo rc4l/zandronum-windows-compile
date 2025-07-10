@@ -1,0 +1,8 @@
+I compiled these OpenSSL static libraries via Perl to save you time. If you prefer compiling it yourself, you can 
+delete the contents of this OpenSSL folder and run the script. It will take a while but that'll
+install Perl and compile the OpenSSL binaries for you to use with Zandronum inside deps. ~ Cata
+
+I make no claim over the source code.
+Perl is licensed under the Artistic License 1.0 or the GNU GPL v1+.
+You can use this code as permitted by those licenses.
+See LICENSE for details from the official Perl source.

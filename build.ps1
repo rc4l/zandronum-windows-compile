@@ -791,7 +791,51 @@ function Get-OpenSSL {
         }
     }
     
-    Write-Status "Building static OpenSSL from source..."
+    # Check for pre-built OpenSSL libraries in tools/openssl/openssl-3.5.1-static-libs.zip
+    $toolsOpenSSLZip = Join-Path $ScriptRoot "tools\openssl\openssl-3.5.1-static-libs.zip"
+    
+    if (Test-Path $toolsOpenSSLZip) {
+        Write-Status "Using pre-built static OpenSSL libraries from tools/openssl/"
+        
+        # Extract ZIP to deps/openssl/
+        if (-not (Test-Path $opensslDir)) {
+            New-Item -ItemType Directory -Path $opensslDir -Force | Out-Null
+        }
+        
+        Write-Host "Extracting pre-built OpenSSL libraries..."
+        try {
+            Expand-Archive7Zip $toolsOpenSSLZip $opensslDir
+            
+            # Verify the extraction worked and libraries exist
+            if ((Test-Path $libCryptoStatic) -and (Test-Path $libSslStatic)) {
+                $cryptoSize = (Get-Item $libCryptoStatic).Length
+                $sslSize = (Get-Item $libSslStatic).Length
+                
+                Write-Host "Pre-built static OpenSSL libraries extracted:"
+                Write-Host "  libcrypto.lib: $([math]::Round($cryptoSize / 1MB, 2)) MB"
+                Write-Host "  libssl.lib: $([math]::Round($sslSize / 1MB, 2)) MB"
+                
+                # Check for version file
+                $versionFile = Join-Path $opensslDir "VERSION.txt"
+                if (Test-Path $versionFile) {
+                    $version = Get-Content $versionFile -Raw
+                    Write-Host "Pre-built OpenSSL version: $($version.Trim())"
+                }
+                
+                Write-Host "Pre-built static OpenSSL ready at: $opensslDir"
+                return $opensslDir
+            } else {
+                Write-Warning "Pre-built OpenSSL libraries not found after extraction"
+                Remove-Item $opensslDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+            Write-Warning "Failed to extract pre-built OpenSSL: $_"
+            Remove-Item $opensslDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    } else {
+        Write-Host "No pre-built OpenSSL ZIP found at tools/openssl-static-libs.zip"
+        Write-Host "Building static OpenSSL from source (this will take several minutes)..."
+    }
     
     # Ensure we have Strawberry Perl
     $perlDir = Get-StrawberryPerl
