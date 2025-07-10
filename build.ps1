@@ -22,10 +22,15 @@
 .PARAMETER SkipDeps
     Skip dependency download/verification (faster for rebuilds)
     
+.PARAMETER ZandronumRef
+    Zandronum tag or commit hash to checkout (default: ZA_3.2)
+    
 .EXAMPLE
     .\build.ps1
     .\build.ps1 -Platform x64 -Configuration Debug
     .\build.ps1 -Clean
+    .\build.ps1 -ZandronumRef "ZA_3.1"
+    .\build.ps1 -ZandronumRef "a1b2c3d4e5f6"
 #>
 
 param(
@@ -36,11 +41,16 @@ param(
     [string]$Configuration = "Release",
     
     [switch]$Clean,
-    [switch]$SkipDeps
+    [switch]$SkipDeps,
+    
+    [string]$ZandronumRef = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# Constants
+$DefaultZandronumRef = "ZA_3.2"  # Default Zandronum tag/commit to checkout
 
 # Script-level variables for tool paths
 $script:CMakeExe = $null
@@ -578,50 +588,128 @@ function Get-WindowsSDK {
 function Get-ZandronumSource {
     $zanSrcDir = Join-Path $SrcDir "zandronum"
     
+    # Determine which ref to use
+    $targetRef = if ([string]::IsNullOrWhiteSpace($ZandronumRef)) { 
+        $DefaultZandronumRef 
+    } else { 
+        $ZandronumRef 
+    }
+    
+    Write-Status "Setting up Zandronum source (ref: $targetRef)..."
+    
+    # Check if we need to clone or update
+    $needsClone = $true
+    $needsUpdate = $false
+    
     if (Test-Path $zanSrcDir) {
-        Write-Host "Zandronum source already exists at: $zanSrcDir"
-        return $zanSrcDir
-    }
-    
-    Write-Status "Cloning Zandronum source code..."
-    
-    # Try Git first (preferred)
-    if (Test-CommandExists "git") {
-        try {
-            Set-Location $SrcDir
-            & git clone https://github.com/TorrSamaho/zandronum.git
-            if ($LASTEXITCODE -eq 0 -and (Test-Path $zanSrcDir)) {
-                Write-Host "Successfully cloned from Git repository"
-                return $zanSrcDir
+        # Check if it's already a Mercurial repository
+        $hgDir = Join-Path $zanSrcDir ".hg"
+        if (Test-Path $hgDir) {
+            Write-Host "Existing Zandronum repository found at: $zanSrcDir"
+            
+            # Check current revision
+            try {
+                Set-Location $zanSrcDir
+                $currentRef = & hg identify --id
+                $currentBranch = & hg branch
+                
+                Write-Host "Current revision: $currentRef"
+                Write-Host "Current branch: $currentBranch"
+                
+                # Check if we're already on the target ref
+                if ($targetRef -eq $currentRef -or $targetRef -eq $currentBranch) {
+                    Write-Host "Already on target ref $targetRef, no update needed"
+                    $needsClone = $false
+                    $needsUpdate = $false
+                } else {
+                    Write-Host "Need to update to ref: $targetRef"
+                    $needsClone = $false
+                    $needsUpdate = $true
+                }
+            } catch {
+                Write-Warning "Failed to check current Mercurial state: $_"
+                Write-Host "Will perform fresh clone"
+                Remove-Item $zanSrcDir -Recurse -Force -ErrorAction SilentlyContinue
+                $needsClone = $true
+                $needsUpdate = $false
+            } finally {
+                Set-Location $ScriptRoot
             }
-        } catch {
-            Write-Warning "Git clone failed: $_"
+        } else {
+            Write-Warning "Directory exists but is not a Mercurial repository, removing and cloning fresh"
+            Remove-Item $zanSrcDir -Recurse -Force -ErrorAction SilentlyContinue
+            $needsClone = $true
         }
     }
     
-    # Fallback to downloading zip
-    Write-Status "Downloading Zandronum source as ZIP..."
-    $zipPath = Join-Path $SrcDir "zandronum.zip"
+    # Ensure we have Mercurial
+    if (-not (Test-CommandExists "hg")) {
+        throw "Mercurial (hg) command not found. Please install Mercurial from https://www.mercurial-scm.org/install or run: winget install Mercurial.Mercurial"
+    }
+    
     try {
-        Invoke-Download "https://github.com/TorrSamaho/zandronum/archive/refs/heads/master.zip" $zipPath
-        Expand-Archive7Zip $zipPath $SrcDir
-        
-        $extractedPath = Join-Path $SrcDir "zandronum-master"
-        if (Test-Path $extractedPath) {
-            Move-Item $extractedPath $zanSrcDir -Force
+        if ($needsClone) {
+            Write-Status "Cloning Zandronum from official repository..."
+            Set-Location $SrcDir
+            
+            & hg clone https://foss.heptapod.net/zandronum/zandronum-stable zandronum
+            if ($LASTEXITCODE -ne 0) {
+                throw "Mercurial clone failed with exit code $LASTEXITCODE"
+            }
+            
+            Set-Location $zanSrcDir
+            
+            # Update to the target ref
+            Write-Host "Updating to ref: $targetRef"
+            & hg update $targetRef
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to update to ref $targetRef with exit code $LASTEXITCODE"
+            }
+            
+            Write-Host "Successfully cloned and updated to $targetRef"
+            
+        } elseif ($needsUpdate) {
+            Write-Status "Updating existing repository to ref: $targetRef"
+            Set-Location $zanSrcDir
+            
+            # Pull latest changes
+            Write-Host "Pulling latest changes..."
+            & hg pull
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Failed to pull latest changes (exit code $LASTEXITCODE), continuing with local repository"
+            }
+            
+            # Update to the target ref
+            Write-Host "Updating to ref: $targetRef"
+            & hg update $targetRef
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to update to ref $targetRef with exit code $LASTEXITCODE"
+            }
+            
+            Write-Host "Successfully updated to $targetRef"
         }
         
-        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+        # Verify the checkout
+        Set-Location $zanSrcDir
+        $finalRef = & hg identify --id
+        $finalBranch = & hg branch
+        Write-Host "Final revision: $finalRef"
+        Write-Host "Final branch: $finalBranch"
         
-        if (Test-Path $zanSrcDir) {
-            Write-Host "Zandronum source ready at: $zanSrcDir"
-            return $zanSrcDir
+        # Verify that essential files exist
+        $cmakeListsPath = Join-Path $zanSrcDir "CMakeLists.txt"
+        if (-not (Test-Path $cmakeListsPath)) {
+            throw "CMakeLists.txt not found in Zandronum source directory. Repository may be corrupted."
         }
+        
+        Write-Host "Zandronum source ready at: $zanSrcDir"
+        return $zanSrcDir
+        
     } catch {
-        throw "Failed to download Zandronum source: $_"
+        throw "Failed to obtain Zandronum source: $_"
+    } finally {
+        Set-Location $ScriptRoot
     }
-    
-    throw "Failed to obtain Zandronum source code"
 }
 
 function Get-FMOD {
