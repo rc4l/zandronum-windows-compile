@@ -23,13 +23,13 @@
     Skip dependency download/verification (faster for rebuilds)
     
 .PARAMETER ZandronumRef
-    Zandronum tag or commit hash to checkout (default: ZA_3.2)
+    Zandronum tag or commit hash to checkout (default: ZA_3.2.1)
     
 .EXAMPLE
     .\build.ps1
     .\build.ps1 -Platform x64 -Configuration Debug
     .\build.ps1 -Clean
-    .\build.ps1 -ZandronumRef "ZA_3.1"
+    .\build.ps1 -ZandronumRef "ZA_3.2.1"
     .\build.ps1 -ZandronumRef "a1b2c3d4e5f6"
 #>
 
@@ -50,7 +50,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # Constants
-$DefaultZandronumRef = "ZA_3.2"  # Default Zandronum tag/commit to checkout
+$DefaultZandronumRef = "ZA_3.2.1"  # Default Zandronum tag/commit to checkout
 
 # Script-level variables for tool paths
 $script:CMakeExe = $null
