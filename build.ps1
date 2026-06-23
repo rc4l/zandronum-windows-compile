@@ -1528,12 +1528,19 @@ function Invoke-CMakeGenerate {
     Write-Host "Running CMake with arguments:"
     Write-Host "  $($cmakeArgs -join ' ')"
     
-    # Run CMake
+    # Run CMake. CMake emits "(dev)" warnings (e.g. find_package at CMakeLists.txt:16)
+    # to stderr; under $ErrorActionPreference='Stop' those can be promoted to a
+    # terminating error even though CMake exits 0 (this aborts a reconfigure). Relax
+    # the preference around the native call and rely on the exit code instead.
+    $previousEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & $script:CMakeExe @cmakeArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "CMake generation failed with exit code $LASTEXITCODE"
+    $cmakeExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousEAP
+    if ($cmakeExitCode -ne 0) {
+        throw "CMake generation failed with exit code $cmakeExitCode"
     }
-    
+
     Write-Status "CMake generation completed successfully!"
 }
 
@@ -1558,11 +1565,17 @@ function Invoke-Build {
     Write-Host "Running CMake build with arguments:"
     Write-Host "  $($buildArgs -join ' ')"
     
+    # MSBuild/compiler warnings also go to stderr; same stderr-as-terminating-error
+    # hazard as the configure step, so relax the preference and trust the exit code.
+    $previousEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & $script:CMakeExe @buildArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "Build failed with exit code $LASTEXITCODE"
+    $buildExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousEAP
+    if ($buildExitCode -ne 0) {
+        throw "Build failed with exit code $buildExitCode"
     }
-    
+
     # Copy FMOD DLLs to output directory
     $outputDir = Join-Path $BuildDir $Configuration
     
